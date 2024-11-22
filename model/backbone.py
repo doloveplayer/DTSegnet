@@ -60,7 +60,7 @@ def trunc_normal_(tensor, mean=0., std=1., a=-2., b=2.):
     return _no_grad_trunc_normal_(tensor, mean, std, a, b)
 
 class OverlapPatchEmbed(nn.Module):
-    def __init__(self, patch_size=7, stride=4, in_chans=3, embed_dim=768):
+    def __init__(self, patch_size=7, stride=4, in_chans=3, embed_dim=512):
         super().__init__()
         patch_size  = (patch_size, patch_size)
         self.proj   = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=stride,
@@ -102,7 +102,6 @@ class DTBlock(nn.Module):
             dim: int = 512,
             heads: int = 12,
             dropout: float = 0.1,
-            in_chans: int = 3,
             depth: int = 24,
             λinit: float = None,
 
@@ -117,7 +116,6 @@ class DTBlock(nn.Module):
         self.depth = depth
         self.λinit = λinit if λinit is not None else (0.8 - 0.6 * exp(-0.3 * (depth - 1)))
         self.norm = SimpleRMSNorm(dim)
-        self.patch_embed = OverlapPatchEmbed(patch_size=7, stride=4, in_chans=in_chans, embed_dim=self.dim)
 
         self.layers = nn.ModuleList(
             [
@@ -146,45 +144,48 @@ class DTBlock(nn.Module):
                 m.bias.data.zero_()
 
     def forward(self, x):
-        # [b,3,h,w]
-        B = x.shape[0]
-        # [b,h/4 * w/4, 3]
-        x, H, W = self.patch_embed.forward(x)
         # norm
         x = self.norm(x)
 
         # Post embed norm
         for layer in self.layers:
             x = layer(x)
-        # [b,c,h/4,w/4]
-        x = x.reshape(B, H, W, -1).permute(0, 3, 1, 2).contiguous()
         return x
 
+
 class DiffTransformerEncoder(nn.Module):
-    def __init__(self, in_chans=3,embed_dims=[32, 64, 160, 256],
+    def __init__(self, in_chans=3, embed_dims=[32, 64, 160, 256],
                  num_heads=[1, 2, 4, 8], depths=[3, 4, 6, 3], drop_rate=0.1):
         super().__init__()
         self.depths = depths
+        self.embed_dims = embed_dims
 
-        # -----------------------------------------------#
-        #   利用transformer模块进行特征提取
-        # -----------------------------------------------#
+        # Initialize transformer blocks
         self.blocks = nn.ModuleList(
             [
                 DTBlock(
                     dim=embed_dims[i], heads=num_heads[i],
-                    dropout=drop_rate, in_chans=in_chans if i == 0 else embed_dims[i-1],depth=depths[i]
+                    dropout=drop_rate, depth=depths[i]
                 )
                 for i in range(4)
             ]
         )
 
+        # Initialize patch embedding layers for each block
+        self.patch_embeds = nn.ModuleList([
+            OverlapPatchEmbed(patch_size=7, stride=4, in_chans=in_chans, embed_dim=embed_dims[0]),
+            OverlapPatchEmbed(patch_size=3, stride=2, in_chans=embed_dims[0], embed_dim=embed_dims[1]),
+            OverlapPatchEmbed(patch_size=3, stride=2, in_chans=embed_dims[1], embed_dim=embed_dims[2]),
+            OverlapPatchEmbed(patch_size=3, stride=2, in_chans=embed_dims[2], embed_dim=embed_dims[3]),
+        ])
+
+        # Initialize weights
         self.apply(self._init_weights)
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
             trunc_normal_(m.weight, std=.02)
-            if isinstance(m, nn.Linear) and m.bias is not None:
+            if m.bias is not None:
                 nn.init.constant_(m.bias, 0)
         elif isinstance(m, nn.LayerNorm):
             nn.init.constant_(m.bias, 0)
@@ -197,16 +198,17 @@ class DiffTransformerEncoder(nn.Module):
                 m.bias.data.zero_()
 
     def forward(self, x):
-        # To store the feature maps at each stage
         feature_maps = []
+        B = x.shape[0]
 
         # Initial input image
         feature_maps.append(x)
 
-        # Passing through each DTBlock, storing output at each stage
-        for i, block in enumerate(self.blocks):
+        # Process through each DTBlock and corresponding patch embedding
+        for i, (block, patch_embed) in enumerate(zip(self.blocks, self.patch_embeds)):
+            x, H, W = patch_embed(x)
             x = block(x)
+            x = x.reshape(B, H, W, -1).permute(0, 3, 1, 2).contiguous()
             feature_maps.append(x)
 
-        # [b, c, h / 4, w / 4]
         return feature_maps
