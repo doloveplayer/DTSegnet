@@ -1,6 +1,7 @@
 import os
 import torch
 from torch.utils.data import Dataset
+from torchvision import transforms
 from PIL import Image
 import numpy as np
 
@@ -64,14 +65,26 @@ PALETTE = [
 
 
 class SegmentationDataset(Dataset):
-    def __init__(self, features_dir, labels_dir, transform=None):
+    def __init__(self, features_dir, labels_dir, transform=None, target_size=(256, 256)):
+        """
+        初始化分割数据集
+        :param features_dir: 特征图像的目录
+        :param labels_dir: 标签图像的目录
+        :param transform: 图像变换（应用于特征图像）
+        :param target_size: 标签图像裁剪大小
+        """
         self.features_dir = features_dir
         self.labels_dir = labels_dir
         self.transform = transform
+        self.target_size = target_size
         self.image_files = [f for f in os.listdir(features_dir) if f.endswith('.tif')]
         self.label_files = [f for f in os.listdir(labels_dir) if f.endswith('.png')]
         self.image_files.sort()
         self.label_files.sort()
+        self.label_transform = transforms.Compose([
+            transforms.Resize(target_size),  # 调整特征图像大小
+            transforms.ToTensor(),
+        ])
 
     def __len__(self):
         return len(self.image_files)
@@ -87,17 +100,8 @@ class SegmentationDataset(Dataset):
         feature = Image.open(feature_path).convert("RGB")
         label = Image.open(label_path).convert("L")
 
-        # color_mapped_img = np.zeros((label.height, label.width, 3), dtype=np.uint8)
-        # 映射为调色板中的颜色
-        # for value, color in enumerate(PALETTE):
-        #     color_mapped_img[np.array(label) == value] = color
-
-        # 应用变换（如果指定）
+        # 对特征图像应用变换
         if self.transform:
             feature = self.transform(feature)
-            # color_mapped_img = self.transform(color_mapped_img)
-
-        # 将标签转换为张量
-        label = torch.tensor(np.array(label), dtype=torch.long)  # 将标签转换为长整型张量
-
+            label = self.label_transform(label)
         return feature, label

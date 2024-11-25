@@ -11,7 +11,7 @@ config = {
     'best_checkpoint': './checkpoints/net_v0/net_v0_best.pth',
     'out_img_dir': './output/net_v0',
     'comment': "net_v0",
-    'train_batch': 1,
+    'train_batch': 4,
     'train_epoch': 100,
     'num_workers': 1,
     'learning_rate': 3e-4,
@@ -32,11 +32,10 @@ config = {
 
 # 定义图像的预处理操作
 transform = transforms.Compose([
-    transforms.RandomResizedCrop(512),  # 随机裁剪并调整大小到 224x224
+    transforms.RandomResizedCrop(256),  # 随机裁剪并调整大小到 224x224
     transforms.ToTensor(),  # 转换为 PyTorch 张量
     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),  # 归一化
 ])
-
 
 def get_train_dataloader():
     dataset = SegmentationDataset(features_dir=config['train_img_path'], labels_dir=config['train_label_path'],

@@ -4,7 +4,6 @@ from .Feature_Fusion import FeatureFusionModule
 from .Bi_Transformer import BiDirectionalAttentionModule
 
 import torch
-from torchinfo import summary
 import torch.nn as nn
 import math
 from utils import trunc_normal_
@@ -137,28 +136,3 @@ class net(nn.Module):
         c_mask = nn.functional.interpolate(c_mask, size=(h, w), mode='bilinear', align_corners=False)  # [b, 3, H, W]
 
         return c_mask
-
-#
-# 测试代码
-if __name__ == "__main__":
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    # 输入模拟
-    batch_size = 1
-    height, width = 512, 512
-    x = torch.randn(batch_size, 3, height, width)
-    x = x.to(device)
-    model = net("v0").to(device)
-    model.eval()
-    # Use torchinfo to summarize the model
-    print("Model Summary:")
-    summary(
-        model,
-        input_size=(1, 3, 512, 512),
-        col_names=["input_size", "output_size", "num_params", "trainable"],
-        # depth=3  # Control the depth of details in the output
-    )
-#
-#     # 测试前向传播
-#     with torch.no_grad():
-#         c_mask = model(x)
-#     print("输出分割掩码形状:", c_mask.shape)  # 应为 [b, 3, H, W]

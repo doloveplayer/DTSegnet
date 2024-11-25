@@ -50,11 +50,8 @@ class UpsampleDecoder(nn.Module):
         for i, block in enumerate(self.upsample_blocks):
             # 跳跃连接特征图从高分辨率到低分辨率依次使用
             skip = skip_features[len(skip_features) - 1 - i]  # 对应 H/16 -> H/8 -> H/4
-            print('skip:', skip.shape)
-            print('x:', x.shape)
             x = torch.cat([x, skip], dim=1)  # 拼接跳跃连接
             x = block(x)  # 上采样并卷积
-            print('outx:', x.shape)
             outputs.append(x)  # 保存结果
         return outputs
 

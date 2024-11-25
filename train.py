@@ -4,6 +4,7 @@ import torch.nn as nn
 from tqdm import tqdm
 from model.net import net
 from utils.metrics import *
+from torchinfo import summary
 from torchvision.utils import make_grid
 from torch.utils.tensorboard import SummaryWriter
 from configs.net_v0 import config, train_loader, val_loader
@@ -58,6 +59,7 @@ def Segmentation_train(model, train_loader, val_loader, device, config):
                 if not fp16:
                     optimizer.zero_grad()
                     outputs = model(images)
+                    labels = labels.squeeze(1)  # 去掉标签的单通道维度
                     loss = loss_fn(outputs, labels.long())
                     loss.backward()
                     optimizer.step()
@@ -65,6 +67,7 @@ def Segmentation_train(model, train_loader, val_loader, device, config):
                     from torch.cuda.amp import autocast
                     with autocast():
                         outputs = model(images)
+                        labels = labels.squeeze(1)  # 去掉标签的单通道维度
                         loss = loss_fn(outputs, labels.long())
 
                     scaler.scale(loss).backward()
@@ -161,5 +164,14 @@ if __name__ == '__main__':
         print("CUDA is not available")
 
     seed_everything()
-    model = net("v0", num_classes=25).to(device)
+    model = net("v0", num_classes=25, input_size=(256, 256)).to(device)
+
+    # model.eval()
+    # print("Model Summary:")
+    # summary(
+    #     model,
+    #     input_size=(1, 3, 256, 256),
+    #     col_names=["input_size", "output_size", "num_params", "trainable"],
+    #     # depth=3  # Control the depth of details in the output
+    # )
     Segmentation_train(model=model, train_loader=train_loader, val_loader=val_loader, config=config, device=device)
