@@ -160,7 +160,6 @@ class DiffTransformerEncoder(nn.Module):
         self.depths = depths
         self.embed_dims = embed_dims
 
-        # Initialize transformer blocks
         self.blocks = nn.ModuleList(
             [
                 DTBlock(
@@ -171,7 +170,6 @@ class DiffTransformerEncoder(nn.Module):
             ]
         )
 
-        # Initialize patch embedding layers for each block
         self.patch_embeds = nn.ModuleList([
             OverlapPatchEmbed(patch_size=7, stride=4, in_chans=in_chans, embed_dim=embed_dims[0]),
             OverlapPatchEmbed(patch_size=3, stride=2, in_chans=embed_dims[0], embed_dim=embed_dims[1]),
@@ -179,7 +177,6 @@ class DiffTransformerEncoder(nn.Module):
             OverlapPatchEmbed(patch_size=3, stride=2, in_chans=embed_dims[2], embed_dim=embed_dims[3]),
         ])
 
-        # Initialize weights
         self.apply(self._init_weights)
 
     def _init_weights(self, m):
@@ -201,10 +198,8 @@ class DiffTransformerEncoder(nn.Module):
         feature_maps = []
         B = x.shape[0]
 
-        # Initial input image
         feature_maps.append(x)
 
-        # Process through each DTBlock and corresponding patch embedding
         for i, (block, patch_embed) in enumerate(zip(self.blocks, self.patch_embeds)):
             x, H, W = patch_embed(x)
             x = block(x)

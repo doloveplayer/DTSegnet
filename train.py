@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from torchinfo import summary
-from model.backbone import DiffTransformerEncoder
+from model.Encoder import DiffTransformerEncoder
 
 torch.cuda.empty_cache()  # 释放未使用的 GPU 内存
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
