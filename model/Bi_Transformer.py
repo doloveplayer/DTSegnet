@@ -1,5 +1,8 @@
 import torch
 import torch.nn as nn
+import math
+from utils import trunc_normal_
+
 
 class MultiHeadAttention(nn.Module):
     def __init__(self, embed_dim, num_heads):
@@ -42,6 +45,23 @@ class BiDirectionalAttentionModule(nn.Module):
             nn.ReLU(),
             nn.Linear(mlp_dim, c4),
         )
+
+        self.apply(self._init_weights)
+
+    def _init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            trunc_normal_(m.weight, std=.02)
+            if isinstance(m, nn.Linear) and m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        elif isinstance(m, nn.LayerNorm):
+            nn.init.constant_(m.bias, 0)
+            nn.init.constant_(m.weight, 1.0)
+        elif isinstance(m, nn.Conv2d):
+            fan_out = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
+            fan_out //= m.groups
+            m.weight.data.normal_(0, math.sqrt(2.0 / fan_out))
+            if m.bias is not None:
+                m.bias.data.zero_()
 
     def forward(self, P1, P4, pos_embed):
         """
@@ -90,15 +110,15 @@ class BiDirectionalAttentionModule(nn.Module):
             p1_attention = cross_attn_p1_to_p4  # 保存 P4 -> P1 的交叉注意力结果
 
         # [b, C4, H/4, W/4]、[b, C4, H/32, W/32]
-        return p1_attention.reshape(b, h1, w1, -1).permute(0, 3, 1, 2).contiguous(),\
-               P4_tokens.reshape(b, h4, w4, -1).permute(0, 3, 1, 2).contiguous()
+        return p1_attention.reshape(b, h1, w1, -1).permute(0, 3, 1, 2).contiguous(), \
+            P4_tokens.reshape(b, h4, w4, -1).permute(0, 3, 1, 2).contiguous()
 
 
 # 测试代码
 if __name__ == "__main__":
     # 输入数据
     P1 = torch.rand(2, 64, 64, 64)  # [b=2, C1=64, H/4=64, W/4=64]
-    P4 = torch.rand(2, 256, 8, 8)   # [b=2, C4=256, H/32=8, W/32=8]
+    P4 = torch.rand(2, 256, 8, 8)  # [b=2, C4=256, H/32=8, W/32=8]
     pos_embed = torch.rand(2, 64, 64, 64)  # [b=2, C1=64, H/4=64, W/4=64]
 
     # 初始化模块
@@ -109,4 +129,4 @@ if __name__ == "__main__":
     # 前向传播
     p1_attention, P4_tokens = bi_attention(P1, P4, pos_embed)
     print("P1 Attention 形状:", p1_attention.shape)  # [b, H/4*W/4, C4]
-    print("P4 Tokens 形状:", P4_tokens.shape)       # [b, H/32*W/32, C4]
+    print("P4 Tokens 形状:", P4_tokens.shape)  # [b, H/32*W/32, C4]

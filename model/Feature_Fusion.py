@@ -1,15 +1,16 @@
-import torch
+import math
 import torch.nn as nn
-import torch.nn.functional as F
+from utils import trunc_normal_
+
 
 class FeatureFusionModule(nn.Module):
-    def __init__(self, in_channels=[32, 64, 160, 256], dropout_rate=0.1):
+    def __init__(self, in_channels=[32, 64, 160, 256], drop_rate=0.1):
         """
         初始化特征融合模块。
         :param in_channels_p2: P2 的输入通道数
         :param in_channels_p3: P3 的输入通道数
         :param in_channels_p4: P4 的输入通道数
-        :param dropout_rate: dropout 的比率，默认为 0.0（不使用）
+        :param drop_rate: dropout 的比率，默认为 0.0（不使用）
         """
         super(FeatureFusionModule, self).__init__()
 
@@ -28,7 +29,23 @@ class FeatureFusionModule(nn.Module):
         )
 
         # Optional dropout for regularization
-        self.dropout = nn.Dropout2d(p=dropout_rate) if dropout_rate > 0 else nn.Identity()
+        self.dropout = nn.Dropout2d(p=drop_rate) if drop_rate > 0 else nn.Identity()
+        self.apply(self._init_weights)
+
+    def _init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            trunc_normal_(m.weight, std=.02)
+            if m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        elif isinstance(m, nn.LayerNorm):
+            nn.init.constant_(m.bias, 0)
+            nn.init.constant_(m.weight, 1.0)
+        elif isinstance(m, nn.Conv2d):
+            fan_out = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
+            fan_out //= m.groups
+            m.weight.data.normal_(0, math.sqrt(2.0 / fan_out))
+            if m.bias is not None:
+                m.bias.data.zero_()
 
     def forward(self, P2, P3, P4):
         """

@@ -3,6 +3,7 @@ import torch.nn.functional as F
 from torch import nn, Tensor
 from math import sqrt, exp
 
+
 class SimpleRMSNorm(nn.Module):
     """
     SimpleRMSNorm
@@ -10,12 +11,15 @@ class SimpleRMSNorm(nn.Module):
     Args:
         dim (int): dimension of the embedding
     """
+
     def __init__(self, dim):
         super().__init__()
-        self.scale = dim**-0.5
+        self.scale = dim ** -0.5
+
     def forward(self, x):
         """Forward method of SimpleRMSNorm"""
         return F.normalize(x, dim=-1) * self.scale
+
 
 class FeedForward(nn.Module):
     def __init__(self, dim: int, hidden_dim: int, bias: bool = False, dropout: float = 0.1):
@@ -27,6 +31,7 @@ class FeedForward(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.dropout(self.w2(F.silu(self.w1(x)) * self.w3(x)))
+
 
 class OutputHead(nn.Module):
     def __init__(self, input_dim, output_dim, activation=None):
@@ -88,12 +93,12 @@ class DiffAttn(nn.Module):
         - Tensor: Output tensor.
         """
 
-        Q = self.W_q(X) #[b,N,embedding_dim]->[b,N,2d]
-        K = self.W_k(X) #[b,N,embedding_dim]->[b,N,2d]
-        V = self.W_v(X) #[b,N,embedding_dim]->[b,N,d]
+        Q = self.W_q(X)  # [b,N,embedding_dim]->[b,N,2d]
+        K = self.W_k(X)  # [b,N,embedding_dim]->[b,N,2d]
+        V = self.W_v(X)  # [b,N,embedding_dim]->[b,N,d]
 
-        Q1, Q2 = self.split(Q) #[b,N,2d]->[b,N,d]
-        K1, K2 = self.split(K) #[b,N,2d]->[b,N,d]
+        Q1, Q2 = self.split(Q)  # [b,N,2d]->[b,N,d]
+        K1, K2 = self.split(K)  # [b,N,2d]->[b,N,d]
 
         s = 1 / sqrt(self.d)
 
@@ -175,6 +180,7 @@ class MultiHeadDifferentialAttention(nn.Module):
 
         return result
 
+
 class DifferentialTransformerBlock(nn.Module):
     """
     This class implements a Differential Transformer Block.
@@ -200,7 +206,7 @@ class DifferentialTransformerBlock(nn.Module):
         # FFN
         self.ffn = FeedForward(
             dim,
-            dim*4,
+            dim * 4,
             dropout=dropout
         )
 
