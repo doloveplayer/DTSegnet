@@ -27,13 +27,13 @@ class ModelConfig:
 configs = {
     "v0": ModelConfig(
         in_chans=3,
-        embed_dims=[32, 64, 160, 256],
-        num_heads_dt=[1, 2, 4, 8],
-        depths_dt=[3, 4, 6, 3],
+        embed_dims=[32, 64, 128, 256],
+        num_heads_dt=[1, 2, 4, 6],
+        depths_dt=[3, 4, 4, 3],
         drop_rate=0.1,
-        num_heads_ba=4,
-        mlp_dim=1024,
-        depth_ba=6,
+        num_heads_ba=2,
+        mlp_dim=512,
+        depth_ba=2,
     )
 }
 
@@ -70,6 +70,8 @@ class net(nn.Module):
         # 通道对齐模块
         self.attention_to_decoder = nn.Conv2d(256, 32, kernel_size=1)  # 将 p1_attention 的 C4 映射到 C1
         self.output_to_classes = nn.Conv2d(32, num_classes, kernel_size=1)  # 将最终输出映射到类别数
+
+        self.apply(self._init_weights)
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
@@ -122,7 +124,8 @@ class net(nn.Module):
 
         # 解码器逐步上采样并恢复到更高分辨率
         # output: [b, 32, H/4, W/4] (解码后的高分辨率特征图)
-        outputs = self.Decoder(fusion_map, [feature_maps[1], feature_maps[2], feature_maps[3], feature_maps[4]])
+        # outputs = self.Decoder(fusion_map, [feature_maps[1], feature_maps[2], feature_maps[3], feature_maps[4]])
+        outputs = self.Decoder(fusion_map)
         output = outputs[-1]  # 取解码器的最后一个输出
 
         # 通道对齐：将 p1_attention 映射到 C1 以便与 output 相加

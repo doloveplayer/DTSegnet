@@ -1,14 +1,73 @@
 import torch
 import torch.nn as nn
 import math
+import torch.nn.functional as F
 from torch.optim.lr_scheduler import _LRScheduler
+
+
+# ===================== 定义损失函数 =====================
+def CE_Loss(inputs, target, cls_weights):
+    weights = torch.from_numpy(cls_weights).to(inputs.device)
+    n, c, h, w = inputs.size()
+    nt, ht, wt = target.size()
+    if h != ht and w != wt:
+        inputs = F.interpolate(inputs, size=(ht, wt), mode="bilinear", align_corners=True)
+
+    temp_inputs = inputs.transpose(1, 2).transpose(2, 3).contiguous().view(-1, c)
+    temp_target = target.view(-1)
+
+    CE_loss = nn.CrossEntropyLoss(weight=weights, ignore_index=-1)(temp_inputs, temp_target)
+    return CE_loss
+
+
+def Focal_Loss(inputs, target, cls_weights, num_classes, alpha=0.5, gamma=2):
+    n, c, h, w = inputs.size()
+    nt, ht, wt = target.size()
+    if h != ht and w != wt:
+        inputs = F.interpolate(inputs, size=(ht, wt), mode="bilinear", align_corners=True)
+
+    temp_inputs = inputs.transpose(1, 2).transpose(2, 3).contiguous().view(-1, c)
+    temp_target = target.view(-1)
+
+    logpt = -nn.CrossEntropyLoss(weight=cls_weights, ignore_index=num_classes, reduction='none')(temp_inputs,
+                                                                                                 temp_target)
+    pt = torch.exp(logpt)
+    if alpha is not None:
+        logpt *= alpha
+    loss = -((1 - pt) ** gamma) * logpt
+    loss = loss.mean()
+    return loss
+
+
+def Dice_loss(inputs, target, beta=1, smooth=1e-5):
+    n, c, h, w = inputs.size()
+    nt, ht, wt, ct = target.size()
+    if h != ht and w != wt:
+        inputs = F.interpolate(inputs, size=(ht, wt), mode="bilinear", align_corners=True)
+
+    temp_inputs = torch.softmax(inputs.transpose(1, 2).transpose(2, 3).contiguous().view(n, -1, c), -1)
+    temp_target = target.view(n, -1, ct)
+
+    # --------------------------------------------#
+    #   计算dice loss
+    # --------------------------------------------#
+    tp = torch.sum(temp_target[..., :-1] * temp_inputs, axis=[0, 1])
+    fp = torch.sum(temp_inputs, axis=[0, 1]) - tp
+    fn = torch.sum(temp_target[..., :-1], axis=[0, 1]) - tp
+
+    score = ((1 + beta ** 2) * tp + smooth) / ((1 + beta ** 2) * tp + beta ** 2 * fn + fp + smooth)
+    dice_loss = 1 - torch.mean(score)
+    return dice_loss
+
+
+# ===================== 修改 get_loss_function 函数 =====================
 
 def get_loss_function(name, **kwargs):
     """
     获取损失函数的工厂方法。
 
     参数:
-    - name (str): 损失函数名称，如 'MSELoss', 'CrossEntropyLoss', 'BCEWithLogitsLoss' 等。
+    - name (str): 损失函数名称，如 'MSELoss', 'CrossEntropyLoss', 'BCEWithLogitsLoss', 'DiceLoss', 'TverskyLoss', 'FocalLoss' 等。
     - kwargs (dict): 传递给损失函数的其他参数。
 
     返回:
@@ -28,6 +87,12 @@ def get_loss_function(name, **kwargs):
         return nn.L1Loss(**kwargs)
     elif name == 'HuberLoss':
         return nn.HuberLoss(**kwargs)
+    elif name == 'DiceLoss':
+        return Dice_loss
+    elif name == 'FocalLoss':
+        return Focal_Loss
+    elif name == 'CELoss':
+        return CE_Loss
     else:
         raise ValueError(f"Unsupported loss function: {name}")
 
@@ -63,6 +128,7 @@ def get_optimizer(name, model, lr, weight_decay=0, **kwargs):
     else:
         raise ValueError(f"Unsupported optimizer: {name}")
 
+
 class WarmupCosineScheduler(_LRScheduler):
     """
     自定义学习率调度器：Warmup + 余弦衰减。
@@ -95,3 +161,6 @@ class WarmupCosineScheduler(_LRScheduler):
             progress = (self.last_epoch - self.warmup_epochs) / (self.max_epochs - self.warmup_epochs)
             cosine_factor = 0.5 * (1 + math.cos(math.pi * progress))
             return [self.eta_min + (base_lr - self.eta_min) * cosine_factor for base_lr in self.base_lrs]
+
+
+

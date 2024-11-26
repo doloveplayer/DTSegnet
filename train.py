@@ -4,10 +4,11 @@ import torch.nn as nn
 from tqdm import tqdm
 from model.net import net
 from utils.metrics import *
+from utils.weight_init import weights_init
 from torchinfo import summary
 from torchvision.utils import make_grid
 from torch.utils.tensorboard import SummaryWriter
-from configs.net_v0 import config, train_loader, val_loader
+from configs.net_v0_VOC import config, train_loader, val_loader
 from utils.modelsave import save_checkpoint, load_checkpoint, seed_everything
 from utils.loss_optimizer import get_loss_function, get_optimizer, WarmupCosineScheduler
 
@@ -31,7 +32,7 @@ def Segmentation_train(model, train_loader, val_loader, device, config):
                               weight_decay=config['weight_decay'])
     scheduler = WarmupCosineScheduler(optimizer, warmup_epochs=config['warmup_epochs'],
                                       max_epochs=epochs, eta_min=1e-6)
-    loss_fn = get_loss_function(name=config['loss_function'])  # Use CrossEntropyLoss for segmentation
+    loss_fn = get_loss_function(name=config['loss_function'])
 
     fp16 = config['fp16']
     if fp16:
@@ -51,16 +52,17 @@ def Segmentation_train(model, train_loader, val_loader, device, config):
     for epoch in range(start_epoch, epochs):
         model.train()
         epoch_loss = 0.0
+        iou_scores = []
+        dice_scores = []
 
         with tqdm(train_loader, desc=f"Epoch {epoch + 1}/{epochs}", unit="batch") as tepoch:
             for images, labels in tepoch:
                 images, labels = images.to(device), labels.to(device)
-
                 if not fp16:
                     optimizer.zero_grad()
                     outputs = model(images)
                     labels = labels.squeeze(1)  # 去掉标签的单通道维度
-                    loss = loss_fn(outputs, labels.long())
+                    loss = loss_fn(outputs, labels.long(), cls_weights=config['cls_weights'])
                     loss.backward()
                     optimizer.step()
                 else:
@@ -68,21 +70,43 @@ def Segmentation_train(model, train_loader, val_loader, device, config):
                     with autocast():
                         outputs = model(images)
                         labels = labels.squeeze(1)  # 去掉标签的单通道维度
-                        loss = loss_fn(outputs, labels.long())
+                        loss = loss_fn(outputs, labels.long(), cls_weights=config['cls_weights'])
 
                     scaler.scale(loss).backward()
                     scaler.step(optimizer)
                     scaler.update()
 
                 epoch_loss += loss.item()
-                tepoch.set_postfix(loss=loss.item())
+
+                # Compute IoU and Dice
+                preds = outputs.argmax(dim=1)
+                _, iou = calculate_iou(preds, labels, config['num_classes'])
+                _, dice = calculate_dice(preds, labels, config['num_classes'])
+
+                iou_scores.append(iou)  # mean IoU
+                dice_scores.append(dice)  # mean Dice
+
+                tepoch.set_postfix(loss=loss.item(), miou=iou, dice=dice)
+
+                # Visualize the images, labels, and predictions in TensorBoard
+                writer.add_image('Inputs/batch', make_grid(images, normalize=True, scale_each=True), epoch)
+                writer.add_image('Labels/batch', make_grid(labels.float(), normalize=True, scale_each=True), epoch)
+
+                # Ensure that predictions are float for make_grid
+                writer.add_image('Predictions/batch', make_grid(preds.float(), normalize=True, scale_each=True), epoch)
 
         scheduler.step()
         writer.add_scalar('Learning Rate', scheduler.get_last_lr()[0], epoch)
 
         avg_epoch_loss = epoch_loss / len(train_loader)
-        print(f'Epoch [{epoch + 1}/{epochs}] train --- Loss: {avg_epoch_loss:.4f}')
+        avg_iou = sum(iou_scores) / len(iou_scores)
+        avg_dice = sum(dice_scores) / len(dice_scores)
+
+        print(
+            f'Epoch [{epoch + 1}/{epochs}] train --- Loss: {avg_epoch_loss:.4f}, IoU: {avg_iou:.4f}, Dice: {avg_dice:.4f}')
         writer.add_scalar('Loss/train', avg_epoch_loss, epoch)
+        writer.add_scalar('IoU/train', avg_iou, epoch)
+        writer.add_scalar('Dice/train', avg_dice, epoch)
 
         # Validation step
         val_loss, val_iou, val_dice, val_images, val_outputs, val_labels = validate_segmentation(
@@ -95,9 +119,12 @@ def Segmentation_train(model, train_loader, val_loader, device, config):
 
         # Save predictions to TensorBoard
         if val_images is not None:
-            writer.add_image('Predictions/val', make_grid(val_outputs, normalize=True, scale_each=True), epoch)
-            writer.add_image('Labels/val', make_grid(val_labels, normalize=True, scale_each=True), epoch)
+            # 修正：将 val_outputs 和 val_labels 转换为浮点型，并扩展通道
             writer.add_image('Inputs/val', make_grid(val_images, normalize=True, scale_each=True), epoch)
+            writer.add_image('Labels/val', make_grid(val_labels.float(), normalize=True, scale_each=True),
+                             epoch)
+            writer.add_image('Predictions/val',
+                             make_grid(val_outputs.float(), normalize=True, scale_each=True), epoch)
 
         # Save checkpoint
         if (epoch + 1) % save_interval == 0:
@@ -137,14 +164,17 @@ def validate_segmentation(model, data_loader, loss_fn, device, epoch):
             images, labels = images.to(device), labels.to(device)
             outputs = model(images)
 
-            loss = loss_fn(outputs, labels.long())
+            labels = labels.squeeze(1)  # 去掉标签的单通道维度
+            loss = loss_fn(outputs, labels.long(), cls_weights=config['cls_weights'])
             running_loss += loss.item()
 
-            preds = outputs.argmax(dim=1)
-
             # Compute IoU and Dice
-            iou_scores.append(calculate_iou(preds, labels))
-            dice_scores.append(calculate_dice(preds, labels))
+            preds = outputs.argmax(dim=1)
+            _, iou = calculate_iou(preds, labels, config['num_classes'])
+            _, dice = calculate_dice(preds, labels, config['num_classes'])
+
+            iou_scores.append(iou)  # mean IoU
+            dice_scores.append(dice)  # mean Dice
 
             if val_images is None:
                 val_images, val_labels, val_outputs = images, labels, preds
@@ -164,14 +194,17 @@ if __name__ == '__main__':
         print("CUDA is not available")
 
     seed_everything()
-    model = net("v0", num_classes=25, input_size=(256, 256)).to(device)
+    model = net("v0", num_classes=config['num_classes'], input_size=config['input_shape']).to(device)
 
-    # model.eval()
-    # print("Model Summary:")
-    # summary(
-    #     model,
-    #     input_size=(1, 3, 256, 256),
-    #     col_names=["input_size", "output_size", "num_params", "trainable"],
-    #     # depth=3  # Control the depth of details in the output
-    # )
-    Segmentation_train(model=model, train_loader=train_loader, val_loader=val_loader, config=config, device=device)
+    weights_init(model)
+
+    model_ = net("v0", num_classes=25, input_size=(512, 512)).to(device)
+    model_.eval()
+    print("Model Summary:")
+    summary(
+        model_,
+        input_size=(1, 3, 512, 512),
+        col_names=["input_size", "output_size", "num_params", "trainable"],
+        # depth=3  # Control the depth of details in the output
+    )
+    # Segmentation_train(model=model, train_loader=train_loader, val_loader=val_loader, config=config, device=device)
