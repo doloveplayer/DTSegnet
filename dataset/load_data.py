@@ -4,6 +4,7 @@ from torch.utils.data import Dataset
 from torchvision import transforms
 from PIL import Image
 import numpy as np
+from torchvision.transforms.functional import resized_crop
 
 # 定义类
 CLASSES = (
@@ -63,6 +64,17 @@ PALETTE = [
     [0, 0, 0]  # unlabeled
 ]
 
+class SynchronizedRandomCrop:
+    def __init__(self, size):
+        self.size = size
+
+    def __call__(self, img, label):
+        # 获取随机裁剪参数
+        i, j, h, w = transforms.RandomResizedCrop.get_params(img, scale=(0.8, 1.0), ratio=(1.0, 1.0))
+        # 同步裁剪图像和标签
+        img = resized_crop(img, i, j, h, w, self.size)
+        label = resized_crop(label, i, j, h, w, self.size)
+        return img, label
 
 class SegmentationDataset(Dataset):
     def __init__(self, features_dir, labels_dir, transform=None, target_size=(256, 256)):
@@ -82,7 +94,7 @@ class SegmentationDataset(Dataset):
         self.image_files.sort()
         self.label_files.sort()
         self.label_transform = transforms.Compose([
-            transforms.Resize(target_size),  # 调整特征图像大小
+            transforms.RandomResizedCrop(256),  # 随机裁剪并调整大小到 224x224
         ])
 
     def __len__(self):
@@ -109,28 +121,17 @@ class SegmentationDataset(Dataset):
 
 
 class VOC2012SegmentationDataset(Dataset):
-    def __init__(self, root, image_set='train', transform=None, target_size=(256, 256)):
-        """
-        :param root: VOC2012 数据集路径（包含 VOCdevkit 文件夹）
-        :param image_set: 数据集划分（'train' 或 'val'）
-        :param transform: 预处理（可选）
-        """
+    def __init__(self, root, image_set='train', transform=None, target_transform=None):
         self.root = root
         self.image_set = image_set
         self.transform = transform
+        self.target_transform = target_transform
 
-        # 图像和标签的文件路径
         self.image_dir = os.path.join(self.root, 'VOC2012', 'JPEGImages')
         self.label_dir = os.path.join(self.root, 'VOC2012', 'SegmentationClass')
 
-        # 划分txt文件的路径
         self.image_set_file = os.path.join(self.root, 'VOC2012', 'ImageSets', 'Segmentation', f'{image_set}.txt')
 
-        self.label_transform = transforms.Compose([
-            transforms.Resize(target_size),  # 调整特征图像大小
-        ])
-
-        # 从txt文件中读取所有的图像ID
         with open(self.image_set_file, 'r') as f:
             self.img_ids = [line.strip() for line in f.readlines()]
 
@@ -138,24 +139,22 @@ class VOC2012SegmentationDataset(Dataset):
         return len(self.img_ids)
 
     def __getitem__(self, idx):
-        # 获取图像ID
         img_id = self.img_ids[idx]
-
-        # 获取图像和标签的文件路径
         img_path = os.path.join(self.image_dir, f'{img_id}.jpg')
         label_path = os.path.join(self.label_dir, f'{img_id}.png')
 
-        # 读取图像和标签
-        img = Image.open(img_path).convert('RGB')  # 转换为RGB模式
-        label = Image.open(label_path)  # 标签是PNG格式，通常是单通道
+        img = Image.open(img_path).convert('RGB')
+        label = Image.open(label_path)
 
-        # 应用预处理（如果有）
+        # 同步裁剪和调整
         if self.transform:
-            img = self.transform(img)
-            label = torch.tensor(np.array(self.label_transform(label)), dtype=torch.long)  # 标签转换为tensor
-            label[label == 255] = 0  # 将255替换为-1，表示忽略
+            img, label = self.transform(img, label)
 
-        unique_label = torch.unique(label)
-        # print(f"Unique label in this data: {unique_label.cpu().numpy()}")
+        # 转换为张量和归一化
+        if self.target_transform:
+            img = self.target_transform(img)
+
+        label = torch.tensor(np.array(label), dtype=torch.long)
+        label[label == 255] = 0  # 忽略255类
 
         return img, label

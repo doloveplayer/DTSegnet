@@ -18,7 +18,7 @@ class UpsampleDecoder(nn.Module):
                 nn.Conv2d(embed_dims[len(embed_dims) - i - 1], embed_dims[len(embed_dims) - i - 2], kernel_size=3,
                           stride=1, padding=1),  # 卷积操作
                 nn.BatchNorm2d(embed_dims[len(embed_dims) - i - 2]),  # 批归一化
-                nn.ReLU(inplace=True)  # 激活函数
+                nn.ReLU() # 激活函数
             )
             for i in range(len(embed_dims) - 1)  # 每次两倍上采样直到 H/4
         ])

@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import numpy as np
 import math
 import torch.nn.functional as F
 from torch.optim.lr_scheduler import _LRScheduler
@@ -7,7 +8,8 @@ from torch.optim.lr_scheduler import _LRScheduler
 
 # ===================== 定义损失函数 =====================
 def CE_Loss(inputs, target, cls_weights):
-    weights = torch.from_numpy(cls_weights).to(inputs.device)
+    cls_weights = np.array(cls_weights)
+    weights = torch.from_numpy(cls_weights).to(inputs.device).float()
     n, c, h, w = inputs.size()
     nt, ht, wt = target.size()
     if h != ht and w != wt:
@@ -16,7 +18,7 @@ def CE_Loss(inputs, target, cls_weights):
     temp_inputs = inputs.transpose(1, 2).transpose(2, 3).contiguous().view(-1, c)
     temp_target = target.view(-1)
 
-    CE_loss = nn.CrossEntropyLoss(weight=weights, ignore_index=-1)(temp_inputs, temp_target)
+    CE_loss = nn.CrossEntropyLoss(weight=weights, ignore_index=0)(temp_inputs, temp_target)
     return CE_loss
 
 
@@ -40,26 +42,37 @@ def Focal_Loss(inputs, target, cls_weights, num_classes, alpha=0.5, gamma=2):
 
 
 def Dice_loss(inputs, target, beta=1, smooth=1e-5):
-    n, c, h, w = inputs.size()
-    nt, ht, wt, ct = target.size()
-    if h != ht and w != wt:
-        inputs = F.interpolate(inputs, size=(ht, wt), mode="bilinear", align_corners=True)
+    """
+    计算带有 beta 的 DICE 损失，适用于多类别分割任务
 
-    temp_inputs = torch.softmax(inputs.transpose(1, 2).transpose(2, 3).contiguous().view(n, -1, c), -1)
-    temp_target = target.view(n, -1, ct)
+    :param inputs: 预测结果 (n, c+1, h, w)，其中 c+1 是类别数+1（包括背景）
+    :param target: 真实标签 (n, h, w)，每个像素是一个整数（类别索引）
+    :param beta: beta 值，用于调节精度和召回之间的权重，默认是 1，表示平衡
+    :param smooth: 平滑因子，避免除零，默认是 1e-5
+    :return: DICE 损失值
+    """
+    n, c, h, w = inputs.size()  # c_plus_1 是类别数 + 1（包括背景）
 
-    # --------------------------------------------#
-    #   计算dice loss
-    # --------------------------------------------#
-    tp = torch.sum(temp_target[..., :-1] * temp_inputs, axis=[0, 1])
-    fp = torch.sum(temp_inputs, axis=[0, 1]) - tp
-    fn = torch.sum(temp_target[..., :-1], axis=[0, 1]) - tp
+    # 对于多类别情况，计算每个类别的 DICE
+    temp_inputs = F.softmax(inputs, dim=1)  # 将 logits 转换为概率分布
 
+    # 将目标标签转换为 one-hot 编码，确保 torch.eye 在 target.device 上
+    temp_target = torch.eye(c, device=target.device)[target.view(-1).long()].view(n, h, w, c)
+
+    # 转置 temp_target，使其形状与 temp_inputs 匹配
+    temp_target = temp_target.permute(0, 3, 1, 2)  # 变为 (n, c, h, w)
+
+    # 计算每个类别的 TP、FP 和 FN
+    tp = torch.sum(temp_target * temp_inputs, dim=[0, 2, 3])  # True positives
+    fp = torch.sum(temp_inputs, dim=[0, 2, 3]) - tp  # False positives
+    fn = torch.sum(temp_target, dim=[0, 2, 3]) - tp  # False negatives
+
+    # 加权 DICE 系数的计算
     score = ((1 + beta ** 2) * tp + smooth) / ((1 + beta ** 2) * tp + beta ** 2 * fn + fp + smooth)
+
+    # 返回 DICE 损失
     dice_loss = 1 - torch.mean(score)
     return dice_loss
-
-
 # ===================== 修改 get_loss_function 函数 =====================
 
 def get_loss_function(name, **kwargs):

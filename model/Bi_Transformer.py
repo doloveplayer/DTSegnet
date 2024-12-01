@@ -33,17 +33,17 @@ class BiDirectionalAttentionModule(nn.Module):
         # MLP layers
         self.mlp = nn.Sequential(
             nn.Linear(c4, mlp_dim),
-            nn.ReLU(),
+            nn.SELU(),
             nn.Linear(mlp_dim, c4),
         )
         self.mlp_p1 = nn.Sequential(
             nn.Linear(c4, mlp_dim),
-            nn.ReLU(),
+            nn.SELU(),
             nn.Linear(mlp_dim, c4),
         )
         self.mlp_p4 = nn.Sequential(
             nn.Linear(c4, mlp_dim),
-            nn.ReLU(),
+            nn.SELU(),
             nn.Linear(mlp_dim, c4),
         )
 

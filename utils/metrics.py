@@ -11,10 +11,10 @@ def calculate_iou(preds, labels, num_classes):
     """
     # 确保 preds 和 labels 是整数类型
     preds = preds.to(torch.int64)
-    # print(f"preds min: {preds.min().item()}, max: {preds.max().item()}")
+    # print(f"\npreds min: {preds.min().item()}, max: {preds.max().item()}")
     # # 打印标签的最小值、最大值和唯一标签值
     # unique_preds = torch.unique(preds)  # 获取每个批次中唯一的标签
-    # print(f"Unique labels in this batch: {unique_preds.cpu().numpy()}")
+    # print(f"Unique preds in this batch: {unique_preds.cpu().numpy()}")
     labels = (labels).to(torch.int64)
     # print(f"Labels min: {labels.min().item()}, max: {labels.max().item()}")
     # # 打印标签的最小值、最大值和唯一标签值

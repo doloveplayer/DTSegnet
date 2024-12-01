@@ -46,31 +46,32 @@ class DTBlock(nn.Module):
 
     def __init__(
             self,
-            dim: int = 512,
-            heads: int = 12,
-            dropout: float = 0.1,
-            depth: int = 24,
-            λinit: float = None,
-
+            d: int,
+            dim: int,
+            heads: int,
+            dropout: float,
+            depth: int,
     ):
         """
         Initializes the Differential Transformer Block.
         """
         super(DTBlock, self).__init__()
+        self.d = d
         self.dim = dim
         self.heads = heads
         self.dropout = dropout
         self.depth = depth
-        self.λinit = λinit if λinit is not None else (0.8 - 0.6 * exp(-0.3 * (depth - 1)))
+        self.lambda_init = 0.8 - 0.6 * exp(-0.3 * (depth - 1))
         self.norm = SimpleRMSNorm(dim)
 
         self.layers = nn.ModuleList(
             [
                 DifferentialTransformerBlock(
-                    dim=self.dim,
+                    d=d,
+                    embedding_dim=self.dim,
                     heads=self.heads,
                     dropout=self.dropout,
-                    λinit=self.λinit,
+                    lambda_init=self.lambda_init,
                 ) for _ in range(self.depth)
             ]
         )
@@ -101,8 +102,7 @@ class DTBlock(nn.Module):
 
 
 class DiffTransformerEncoder(nn.Module):
-    def __init__(self, in_chans=3, embed_dims=[32, 64, 160, 256],
-                 num_heads=[1, 2, 4, 8], depths=[3, 4, 6, 3], drop_rate=0.1):
+    def __init__(self, in_chans, embed_dims, num_heads, depths, drop_rate):
         super().__init__()
         self.depths = depths
         self.embed_dims = embed_dims
@@ -110,7 +110,8 @@ class DiffTransformerEncoder(nn.Module):
         self.blocks = nn.ModuleList(
             [
                 DTBlock(
-                    dim=embed_dims[i], heads=num_heads[i],
+                    d=embed_dims[i],
+                    dim=256, heads=num_heads[i],
                     dropout=drop_rate, depth=depths[i]
                 )
                 for i in range(4)

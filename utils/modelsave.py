@@ -2,6 +2,10 @@ import torch
 import os
 import random
 import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.cm as cm
+from matplotlib.colors import Normalize
+
 
 def seed_everything(seed=11):
     random.seed(seed)
@@ -11,6 +15,7 @@ def seed_everything(seed=11):
     torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+
 
 def save_checkpoint(model, optimizer, epoch, loss, filepath):
     """保存检查点函数"""
@@ -23,8 +28,10 @@ def save_checkpoint(model, optimizer, epoch, loss, filepath):
     }
     torch.save(checkpoint, filepath)
 
+
 import os
 import torch
+
 
 def load_checkpoint(filepath, model, optimizer=None, strict=False):
     """
@@ -90,3 +97,92 @@ def load_checkpoint(filepath, model, optimizer=None, strict=False):
 
     return epoch, loss
 
+
+def save_epoch_predictions(images, labels, preds, out_dir, epoch_idx, mean, std, num_classes):
+    """
+    Save a large image for a given epoch, showing images, labels, and predictions.
+    The labels and predictions are mapped to RGB using a colormap.
+
+    :param images: Tensor of shape (B, C, H, W), batch of images
+    :param labels: Tensor of shape (B, H, W), batch of label indices
+    :param preds: Tensor of shape (B, H, W), batch of predicted indices
+    :param out_dir: Directory where the results will be saved
+    :param epoch_idx: The index of the current epoch
+    :param mean: The mean used for image normalization
+    :param std: The standard deviation used for image normalization
+    :param num_classes: The number of classes in the segmentation task
+    """
+    # Process images: Inverse normalize the images (denormalization)
+    images_np = process_image(images, mean, std)
+
+    # Convert the labels and predictions to numpy arrays
+    labels_np = labels.cpu().numpy()
+    preds_np = preds.cpu().numpy()
+
+    # Normalize the labels and predictions to [0, 1] range for colormap
+    norm = Normalize(vmin=0, vmax=num_classes - 1)
+
+    # Create a colormap (e.g., 'tab20' for a large number of classes)
+    cmap = cm.get_cmap('tab20', num_classes)
+
+    # Get number of batches
+    num_batches = len(images)
+
+    # Create a large canvas for the plot
+    fig, axes = plt.subplots(num_batches, 3, figsize=(12, num_batches * 4))
+
+    # Iterate over each batch and display image, label, and prediction
+    for batch_idx in range(num_batches):
+        # Display the original image
+        axes[batch_idx, 0].imshow(images_np[batch_idx])
+        axes[batch_idx, 0].set_title(f'Image {batch_idx}')
+        axes[batch_idx, 0].axis('off')
+
+        # Map label indices to RGB using the colormap
+        label_rgb = cmap(norm(labels_np[batch_idx]))  # shape [H, W, 4] (RGBA)
+        axes[batch_idx, 1].imshow(label_rgb)
+        axes[batch_idx, 1].set_title(f'Label {batch_idx}')
+        axes[batch_idx, 1].axis('off')
+
+        # Map prediction indices to RGB using the colormap
+        pred_rgb = cmap(norm(preds_np[batch_idx]))  # shape [H, W, 4] (RGBA)
+        axes[batch_idx, 2].imshow(pred_rgb)
+        axes[batch_idx, 2].set_title(f'Pred {batch_idx}')
+        axes[batch_idx, 2].axis('off')
+
+    # Adjust layout to avoid overlap
+    plt.tight_layout()
+
+    # Save the figure
+    save_path = os.path.join(out_dir, f'epoch_{epoch_idx}_preds.png')
+    plt.savefig(save_path, bbox_inches='tight', pad_inches=0.1)
+    plt.close(fig)
+
+
+def process_image(images, mean, std):
+    """
+    Inverse normalize the image tensors to their original pixel range.
+
+    :param images: Tensor of shape (B, C, H, W)
+    :param mean: Mean used for normalization (list or tensor)
+    :param std: Standard deviation used for normalization (list or tensor)
+    :return: Denormalized images as numpy arrays
+    """
+    # 如果 mean 和 std 是列表，转换成 Tensor
+    if isinstance(mean, list):
+        mean = torch.tensor(mean).float()
+    if isinstance(std, list):
+        std = torch.tensor(std).float()
+
+    # 获取 images 所在的设备
+    device = images.device
+
+    # 将 mean 和 std 移动到与 images 相同的设备
+    mean = mean.to(device)
+    std = std.to(device)
+
+    # 进行逆归一化
+    images = images * std[None, :, None, None] + mean[None, :, None, None]
+
+    # 转换为 numpy
+    return images.cpu().numpy().transpose(0, 2, 3, 1)  # Change to (B, H, W, C)

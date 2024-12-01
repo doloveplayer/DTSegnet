@@ -27,10 +27,10 @@ class ModelConfig:
 configs = {
     "v0": ModelConfig(
         in_chans=3,
-        embed_dims=[32, 64, 128, 256],
-        num_heads_dt=[1, 2, 4, 6],
-        depths_dt=[3, 4, 4, 3],
-        drop_rate=0.1,
+        embed_dims=[32, 64, 128, 160],
+        num_heads_dt=[1, 2, 3, 4],
+        depths_dt=[1, 2, 3, 4],
+        drop_rate=0,
         num_heads_ba=2,
         mlp_dim=512,
         depth_ba=2,
@@ -68,8 +68,9 @@ class net(nn.Module):
         self.bi_attention_pos_embed = nn.Parameter(torch.randn(1, 32, input_size[0] // 4, input_size[1] // 4))
 
         # 通道对齐模块
-        self.attention_to_decoder = nn.Conv2d(256, 32, kernel_size=1)  # 将 p1_attention 的 C4 映射到 C1
-        self.output_to_classes = nn.Conv2d(32, num_classes, kernel_size=1)  # 将最终输出映射到类别数
+        self.attention_to_decoder = nn.Conv2d(self.config.embed_dims[3], self.config.embed_dims[0],
+                                              kernel_size=1)  # 将 p1_attention 的 C4 映射到 C1
+        self.output_to_classes = nn.Conv2d(self.config.embed_dims[0], num_classes, kernel_size=1)  # 将最终输出映射到类别数
 
         self.apply(self._init_weights)
 
@@ -120,7 +121,7 @@ class net(nn.Module):
 
         # 特征融合模块，将 [b, 64, H/8, W/8] 和 [b, 160, H/16, W/16] 与 P4_feature_map 融合
         # fusion_map: [b, 256, H/32, W/32]
-        fusion_map = self.FusionModule(feature_maps[2], feature_maps[3], P4_feature_map)
+        fusion_map = self.FusionModule(feature_maps[2], feature_maps[3], feature_maps[4])+P4_feature_map
 
         # 解码器逐步上采样并恢复到更高分辨率
         # output: [b, 32, H/4, W/4] (解码后的高分辨率特征图)

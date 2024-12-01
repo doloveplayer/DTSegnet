@@ -77,11 +77,11 @@ class DiffAttn(nn.Module):
     def __init__(self, d: int, embedding_dim: int):
         super(DiffAttn, self).__init__()
         self.d = d
-        self.W_q = nn.Linear(embedding_dim, 2 * d)
-        self.W_k = nn.Linear(embedding_dim, 2 * d)
-        self.W_v = nn.Linear(embedding_dim, d)  # Changed to output d dimensions
+        self.W_q = nn.Linear(d, 2 * embedding_dim)
+        self.W_k = nn.Linear(d, 2 * embedding_dim)
+        self.W_v = nn.Linear(d, embedding_dim)  # Changed to output d dimensions
 
-    def forward(self, X: Tensor, λ: float) -> Tensor:
+    def forward(self, X: Tensor, lambda_: float) -> Tensor:
         """
         Forward pass of the Differential Attention module.
 
@@ -93,22 +93,23 @@ class DiffAttn(nn.Module):
         - Tensor: Output tensor.
         """
 
-        Q = self.W_q(X)  # [b,N,embedding_dim]->[b,N,2d]
-        K = self.W_k(X)  # [b,N,embedding_dim]->[b,N,2d]
-        V = self.W_v(X)  # [b,N,embedding_dim]->[b,N,d]
+        Q = self.W_q(X)  # [b,N,d]->[b,N,2embedding_dim]
+        K = self.W_k(X)  # [b,N,d]->[b,N,2embedding_dim]
+        V = self.W_v(X)  # [b,N,d]->[b,N,embedding_dim]
 
-        Q1, Q2 = self.split(Q)  # [b,N,2d]->[b,N,d]
-        K1, K2 = self.split(K)  # [b,N,2d]->[b,N,d]
+        Q1, Q2 = self.split(Q)  # [b,N,2embedding_dim]->[b,N,embedding_dim]
+        K1, K2 = self.split(K)  # [b,N,2embedding_dim]->[b,N,embedding_dim]
 
         s = 1 / sqrt(self.d)
 
+        # [b,N,N]
         A1 = (Q1 @ K1.transpose(-1, -2)) * s
         A2 = (Q2 @ K2.transpose(-1, -2)) * s
 
         A1_softmax = F.softmax(A1, dim=-1)
         A2_softmax = F.softmax(A2, dim=-1)
 
-        result = (A1_softmax - λ * A2_softmax) @ V
+        result = (A1_softmax - lambda_ * A2_softmax) @ V
         return result
 
     @staticmethod
@@ -142,41 +143,49 @@ class MultiHeadDifferentialAttention(nn.Module):
     - norm (nn.LayerNorm): Layer normalization module.
     """
 
-    def __init__(self, h: int, d: int, embedding_dim: int, λinit: float):
+    def __init__(self, h: int, d: int, embedding_dim: int, lambda_init: float):
         super(MultiHeadDifferentialAttention, self).__init__()
         self.h = h
         self.d = d
-        self.λinit = λinit
+        self.lambda_init = lambda_init
         self.embedding_dim = embedding_dim
         self.diff_attn_heads = nn.ModuleList([DiffAttn(d, embedding_dim) for _ in range(h)])
-        self.W_o = nn.Linear(h * d, embedding_dim)  # Changed to h * d
-        self.norm = nn.LayerNorm(embedding_dim)
-        self.λ = nn.Parameter(torch.full((1,), λinit))  # Learnable λ initialized to λinit
+        self.W_o = nn.Linear(h * embedding_dim, d)  # Changed to h * d
+        # Initialize λ parameters for each head
+        self.lambda_q1 = nn.Parameter(torch.zeros(h, embedding_dim).normal_(mean=0, std=0.1))
+        self.lambda_k1 = nn.Parameter(torch.zeros(h, embedding_dim).normal_(mean=0, std=0.1))
+        self.lambda_q2 = nn.Parameter(torch.zeros(h, embedding_dim).normal_(mean=0, std=0.1))
+        self.lambda_k2 = nn.Parameter(torch.zeros(h, embedding_dim).normal_(mean=0, std=0.1))
 
     def forward(self, X: Tensor) -> Tensor:
         """
         Forward pass of the Multi-Head Differential Attention module.
 
         Args:
-        - X (Tensor): Input tensor.
+        - X (Tensor): Input tensor. [b,H*W,d]-->[b,H*W,2embedding_dim]-->[b,H*W,embedding_dim]
         - λ (float): Scaling factor for the difference.
 
         Returns:
         - Tensor: Output tensor.
         """
 
-        O_list = [head(X, self.λ) for head in self.diff_attn_heads]
+        O_list = []
+
+        for i, head in enumerate(self.diff_attn_heads):
+            # Calculate the dynamic λ for each head
+            lambda_1 = torch.exp(torch.sum(self.lambda_q1[i] * self.lambda_k1[i], dim=-1).float()).type_as(X)
+            lambda_2 = torch.exp(torch.sum(self.lambda_q2[i] * self.lambda_k2[i], dim=-1).float()).type_as(X)
+            lambda_full = lambda_1 - lambda_2 + self.lambda_init
+
+            # Perform attention for the current head with the calculated λ_full
+            O = head(X, lambda_full)
+            # [b,N,d]
+            O_list.append(O)
 
         O_concat = torch.cat(O_list, dim=-1)
 
         # Apply the output transformation
-        result = self.W_o(O_concat)
-
-        # Apply LayerNorm
-        result = self.norm(result)
-
-        # Scale by λinit
-        result = result * (1 - self.λinit)
+        result = self.W_o(O_concat) * (1 - self.lambda_init)
 
         return result
 
@@ -188,10 +197,11 @@ class DifferentialTransformerBlock(nn.Module):
 
     def __init__(
             self,
-            dim: int,
-            heads: int = 12,
-            dropout: float = 0.1,
-            λinit: float = 0.8
+            d: int,
+            embedding_dim: int,
+            heads: int,
+            dropout: float,
+            lambda_init: float
     ):
         """
         Initializes the Differential Transformer Block.
@@ -200,17 +210,17 @@ class DifferentialTransformerBlock(nn.Module):
 
         # Differential
         self.attn = MultiHeadDifferentialAttention(
-            h=heads, d=dim, embedding_dim=dim, λinit=λinit
+            h=heads, d=d, embedding_dim=embedding_dim, lambda_init=lambda_init
         )
 
         # FFN
         self.ffn = FeedForward(
-            dim,
-            dim * 4,
+            d,
+            embedding_dim,
             dropout=dropout
         )
 
-        self.norm = SimpleRMSNorm(dim)
+        self.norm = SimpleRMSNorm(embedding_dim)
 
     def forward(self, x: Tensor):
         """
@@ -223,7 +233,7 @@ class DifferentialTransformerBlock(nn.Module):
 
         residual2 = attended
 
-        attended = self.ffn(attended) + residual2
+        attended = self.ffn(self.norm(attended)) + residual2
 
         return attended
 
