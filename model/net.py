@@ -24,11 +24,10 @@ class ModelConfig:
         self.mlp_dim = mlp_dim
         self.depth_ba = depth_ba
 
-
 configs = {
     "v0": ModelConfig(
         in_chans=3,
-        embed_dims=[32, 64, 128, 160],
+        embed_dims=[32, 64, 128, 256],
         num_heads_dt=[1, 2, 3, 4],
         depths_dt=[1, 2, 3, 4],
         drop_rate=0,
@@ -108,8 +107,8 @@ class net(nn.Module):
 
         # 解码器逐步上采样并恢复到更高分辨率
         # output: [b, 32, H/4, W/4] (解码后的高分辨率特征图)
-        # outputs = self.Decoder(fusion_map, [feature_maps[1], feature_maps[2], feature_maps[3], feature_maps[4]])
-        outputs = self.Decoder(fusion_map)
+        outputs = self.Decoder(fusion_map, [feature_maps[1], feature_maps[2], feature_maps[3], feature_maps[4]])
+        # outputs = self.Decoder(fusion_map)
         output = outputs[-1]  # 取解码器的最后一个输出
 
         # 通道对齐：将 p1_attention 映射到 C1 以便与 output 相加

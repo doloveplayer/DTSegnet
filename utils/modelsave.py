@@ -7,7 +7,7 @@ import matplotlib.cm as cm
 from matplotlib.colors import Normalize
 
 
-def seed_everything(seed=11):
+def seed_everything(seed=42):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -99,15 +99,6 @@ def save_epoch_predictions(images, labels, preds, out_dir, epoch_idx, mean, std,
     """
     Save a large image for a given epoch, showing images, labels, and predictions.
     The labels and predictions are mapped to RGB using a colormap.
-
-    :param images: Tensor of shape (B, C, H, W), batch of images
-    :param labels: Tensor of shape (B, H, W), batch of label indices
-    :param preds: Tensor of shape (B, H, W), batch of predicted indices
-    :param out_dir: Directory where the results will be saved
-    :param epoch_idx: The index of the current epoch
-    :param mean: The mean used for image normalization
-    :param std: The standard deviation used for image normalization
-    :param num_classes: The number of classes in the segmentation task
     """
     # Process images: Inverse normalize the images (denormalization)
     images_np = process_image(images, mean, std)
@@ -127,6 +118,10 @@ def save_epoch_predictions(images, labels, preds, out_dir, epoch_idx, mean, std,
 
     # Create a large canvas for the plot
     fig, axes = plt.subplots(num_batches, 3, figsize=(12, num_batches * 4))
+
+    # If there is only one batch, axes will be a 1D array, so we need to handle that case
+    if num_batches == 1:
+        axes = np.expand_dims(axes, axis=0)  # Make it 2D
 
     # Iterate over each batch and display image, label, and prediction
     for batch_idx in range(num_batches):

@@ -45,7 +45,6 @@ class DTBlock(nn.Module):
         self.dropout = dropout
         self.depth = depth
         self.lambda_init = 0.8 - 0.6 * exp(-0.3 * (depth - 1))
-        self.norm = SimpleRMSNorm(dim)
 
         self.layers = nn.ModuleList(
             [
@@ -60,9 +59,6 @@ class DTBlock(nn.Module):
         )
 
     def forward(self, x):
-        # norm
-        x = self.norm(x)
-
         # Post embed norm
         for layer in self.layers:
             x = layer(x)

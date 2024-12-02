@@ -7,11 +7,11 @@ from torchinfo import summary
 from utils.weight_init import weights_init
 from torch.cuda.amp import autocast, GradScaler
 from torch.utils.tensorboard import SummaryWriter
-from configs.net_v0 import config, train_loader, val_loader
+from configs.net_v0_VOC import config, train_loader, val_loader
 from utils.modelsave import save_checkpoint, load_checkpoint, seed_everything, save_epoch_predictions
 from utils.loss_optimizer import get_loss_function, get_optimizer, WarmupCosineScheduler
 
-from model.segformer.segformer import SegFormer
+from dataset.load_data import visualize_batch
 
 torch.cuda.empty_cache()
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -55,6 +55,8 @@ def Segmentation_train(model, train_loader, val_loader, device, config):
     # 加载检查点
     best_iou = 0.0
     start_epoch, _ = load_checkpoint(config['best_checkpoint'], model, optimizer)
+    # start_epoch, _ = load_checkpoint("/root/autodl-tmp/DTSegnet/checkpoints/net_v0_voc2012/checkpoint_epoch_40.pth", model, optimizer)
+
     start_epoch = start_epoch if start_epoch is not None else 0
 
     no_improve_epochs = 0
@@ -64,8 +66,6 @@ def Segmentation_train(model, train_loader, val_loader, device, config):
         epoch_loss = 0.0
         iou_scores = []
         dice_scores = []
-        iou_per_class = [[] for _ in range(config['num_classes'])]  # 初始化每个类别的 IoU 存储列表
-        dice_per_class = [[] for _ in range(config['num_classes'])]  # 初始化每个类别的 Dice 存储列表
 
         with tqdm(train_loader, desc=f"Epoch {epoch + 1}/{epochs}", unit="batch") as tepoch:
             for batch_idx, (images, labels) in enumerate(tepoch):
@@ -83,9 +83,9 @@ def Segmentation_train(model, train_loader, val_loader, device, config):
                     labels = labels.squeeze(1)  # 移除标签的单通道维度
                     loss = loss_fn(outputs, labels.long(), cls_weights=config['cls_weights'])
 
-                # 梯度累积
-                if accumulation_steps > 1:
-                    loss = loss / accumulation_steps
+                # # 梯度累积
+                # if accumulation_steps > 1:
+                #     loss = loss
 
                 if fp16:
                     # 使用混合精度时，反向传播需要梯度缩放
@@ -98,6 +98,7 @@ def Segmentation_train(model, train_loader, val_loader, device, config):
                     # 不使用混合精度时，正常反向传播
                     loss.backward()
                     if (batch_idx + 1) % accumulation_steps == 0:
+                        print("updata")
                         optimizer.step()
                         optimizer.zero_grad()  # 在每个batch开始前清空梯度
 
@@ -105,18 +106,25 @@ def Segmentation_train(model, train_loader, val_loader, device, config):
 
                 # 计算IoU和Dice
                 preds = outputs.argmax(dim=1)
-                iou_class, iou = calculate_iou(preds, labels, config['num_classes'], ignored_classes=[0])
-                dice_class, dice = calculate_dice(preds, labels, config['num_classes'], ignored_classes=[0])
+                _, iou = calculate_iou(preds, labels, config['num_classes'], ignored_classes=[0])
+                _, dice = calculate_dice(preds, labels, config['num_classes'], ignored_classes=[0])
 
                 iou_scores.append(iou)
                 dice_scores.append(dice)
 
-                # 保存每个类别的IoU和Dice
-                for class_idx in range(config['num_classes']):
-                    iou_per_class[class_idx].append(iou_class[class_idx])
-                    dice_per_class[class_idx].append(dice_class[class_idx])
-
                 tepoch.set_postfix(loss=loss.item(), miou=iou, dice=dice)
+
+                # Example usage
+                save_epoch_predictions(
+                    images=images,
+                    labels=labels,
+                    preds=preds,
+                    out_dir=out_dir,
+                    epoch_idx=epoch,
+                    mean=[0.485, 0.456, 0.406],  # Example mean
+                    std=[0.229, 0.224, 0.225],  # Example std
+                    num_classes=21  # For example, 21 classes in segmentation
+                )
 
         scheduler.step()
         writer.add_scalar('Learning Rate', scheduler.get_last_lr()[0], epoch)
@@ -125,33 +133,25 @@ def Segmentation_train(model, train_loader, val_loader, device, config):
         avg_iou = sum(iou_scores) / len(iou_scores)
         avg_dice = sum(dice_scores) / len(dice_scores)
 
-        avg_iou_per_class = [sum(iou) / len(iou) for iou in iou_per_class]
-        avg_dice_per_class = [sum(dice) / len(dice) for dice in dice_per_class]
-
         print(
             f'Epoch [{epoch + 1}/{epochs}] train --- Loss: {avg_epoch_loss:.4f}, IoU: {avg_iou:.4f}, Dice: {avg_dice:.4f}')
         writer.add_scalar('Loss/train', avg_epoch_loss, epoch)
         writer.add_scalar('IoU/train', avg_iou, epoch)
         writer.add_scalar('Dice/train', avg_dice, epoch)
 
-        # 记录每个类别的IoU和Dice到TensorBoard
-        for class_idx in range(config['num_classes']):
-            writer.add_scalar(f'train_IoU/class_{class_idx}', avg_iou_per_class[class_idx], epoch)
-            writer.add_scalar(f'train_Dice/class_{class_idx}', avg_dice_per_class[class_idx], epoch)
-
         # 验证步骤
-        val_loss, val_iou, val_dice, val_iou_per_class, val_dice_per_class, val_images, val_outputs, val_labels = \
+        val_loss, val_iou, val_dice, val_images, val_outputs, val_labels = \
             (validate_segmentation(model, val_loader, loss_fn, device, epoch, config))
+
+        unique_preds = torch.unique(val_outputs)
+        print(f"Unique preds in this batch: {unique_preds.cpu().numpy()}")
+        unique_labels = torch.unique(val_labels)
+        print(f"Unique labels in this batch: {unique_labels.cpu().numpy()}")
 
         print(f'Epoch [{epoch + 1}/{epochs}] val --- Loss: {val_loss:.4f}, IoU: {val_iou:.4f}, Dice: {val_dice:.4f}')
         writer.add_scalar('Loss/val', val_loss, epoch)
         writer.add_scalar('IoU/val', val_iou, epoch)
         writer.add_scalar('Dice/val', val_dice, epoch)
-
-        # 记录每个类别的IoU和Dice到TensorBoard
-        for class_idx in range(config['num_classes']):
-            writer.add_scalar(f'val_IoU/class_{class_idx}', val_iou_per_class[class_idx], epoch)
-            writer.add_scalar(f'val_Dice/class_{class_idx}', val_dice_per_class[class_idx], epoch)
 
         # 保存检查点
         if (epoch + 1) % save_interval == 0:
@@ -185,8 +185,6 @@ def validate_segmentation(model, data_loader, loss_fn, device, epoch, config):
     running_loss = 0.0
     iou_scores = []
     dice_scores = []
-    iou_per_class = [[] for _ in range(config['num_classes'])]  # 初始化每个类别的 IoU 存储列表
-    dice_per_class = [[] for _ in range(config['num_classes'])]  # 初始化每个类别的 Dice 存储列表
 
     val_images, val_labels, val_outputs = None, None, None
 
@@ -201,16 +199,11 @@ def validate_segmentation(model, data_loader, loss_fn, device, epoch, config):
 
             # 计算IoU和Dice
             preds = outputs.argmax(dim=1)
-            iou_class, iou = calculate_iou(preds, labels, config['num_classes'], ignored_classes=[0])
-            dice_class, dice = calculate_dice(preds, labels, config['num_classes'], ignored_classes=[0])
+            _, iou = calculate_iou(preds, labels, config['num_classes'], ignored_classes=[0])
+            _, dice = calculate_dice(preds, labels, config['num_classes'], ignored_classes=[0])
 
             iou_scores.append(iou)  # 保存当前batch的IoU
             dice_scores.append(dice)  # 保存当前batch的Dice
-
-            # 保存每个类别的IoU和Dice
-            for class_idx in range(config['num_classes']):
-                iou_per_class[class_idx].append(iou_class[class_idx])
-                dice_per_class[class_idx].append(dice_class[class_idx])
 
             # 保存最后一批次的数据（可以选择保存任何一批次的数据）
             val_images, val_labels, val_outputs = images, labels, preds
@@ -220,10 +213,7 @@ def validate_segmentation(model, data_loader, loss_fn, device, epoch, config):
     avg_iou = sum(iou_scores) / len(iou_scores)
     avg_dice = sum(dice_scores) / len(dice_scores)
 
-    avg_iou_per_class = [sum(iou) / len(iou) for iou in iou_per_class]
-    avg_dice_per_class = [sum(dice) / len(dice) for dice in dice_per_class]
-
-    return avg_loss, avg_iou, avg_dice, avg_iou_per_class, avg_dice_per_class, val_images, val_outputs, val_labels
+    return avg_loss, avg_iou, avg_dice, val_images, val_outputs, val_labels
 
 
 if __name__ == '__main__':
@@ -235,19 +225,24 @@ if __name__ == '__main__':
 
     seed_everything()
     model = net("v0", num_classes=config['num_classes'], input_size=config['input_shape']).to(device)
-    weights_init(model)
+    # 初始化权重
+    weights_init(model, init_type='kaiming', init_gain=0.1, bias_init='normal')
+
+    # for batch in train_loader:
+    #     visualize_batch(batch, save_dir="./", filename="batch_image.png")
+    #     break
 
     # model_seg = SegFormer(phi="b0").to(device)
     # weights_init(model_seg)
 
-    # model_ = net("v0", num_classes=21, input_size=(512, 512)).to(device)
+    model_ = net("v0", num_classes=21, input_size=(512, 512)).to(device)
     # model_ = SegFormer(phi="b0").to(device)
-    # model_.eval()
-    # print("Model Summary:")
-    # summary(
-    #     model_,
-    #     input_size=(1, 3, 512, 512),
-    #     col_names=["input_size", "output_size", "num_params", "trainable"],
-    #     # depth=3  # Control the depth of details in the output
-    # )
-    Segmentation_train(model=model, train_loader=train_loader, val_loader=val_loader, config=config, device=device)
+    model_.eval()
+    print("Model Summary:")
+    summary(
+        model_,
+        input_size=(1, 3, 512, 512),
+        col_names=["input_size", "output_size", "num_params", "trainable"],
+        # depth=3  # Control the depth of details in the output
+    )
+    # Segmentation_train(model=model, train_loader=train_loader, val_loader=val_loader, config=config, device=device)

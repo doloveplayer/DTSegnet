@@ -22,7 +22,9 @@ def CE_Loss(inputs, target, cls_weights):
     return CE_loss
 
 
-def Focal_Loss(inputs, target, cls_weights, num_classes, alpha=0.5, gamma=2):
+def Focal_Loss(inputs, target, cls_weights, alpha=0.5, gamma=2):
+    cls_weights = np.array(cls_weights)
+    weights = torch.from_numpy(cls_weights).to(inputs.device).float()
     n, c, h, w = inputs.size()
     nt, ht, wt = target.size()
     if h != ht and w != wt:
@@ -31,8 +33,7 @@ def Focal_Loss(inputs, target, cls_weights, num_classes, alpha=0.5, gamma=2):
     temp_inputs = inputs.transpose(1, 2).transpose(2, 3).contiguous().view(-1, c)
     temp_target = target.view(-1)
 
-    logpt = -nn.CrossEntropyLoss(weight=cls_weights, ignore_index=num_classes, reduction='none')(temp_inputs,
-                                                                                                 temp_target)
+    logpt = -nn.CrossEntropyLoss(weight=weights, ignore_index=0, reduction='none')(temp_inputs, temp_target)
     pt = torch.exp(logpt)
     if alpha is not None:
         logpt *= alpha
@@ -73,6 +74,8 @@ def Dice_loss(inputs, target, beta=1, smooth=1e-5):
     # 返回 DICE 损失
     dice_loss = 1 - torch.mean(score)
     return dice_loss
+
+
 # ===================== 修改 get_loss_function 函数 =====================
 
 def get_loss_function(name, **kwargs):
@@ -174,6 +177,3 @@ class WarmupCosineScheduler(_LRScheduler):
             progress = (self.last_epoch - self.warmup_epochs) / (self.max_epochs - self.warmup_epochs)
             cosine_factor = 0.5 * (1 + math.cos(math.pi * progress))
             return [self.eta_min + (base_lr - self.eta_min) * cosine_factor for base_lr in self.base_lrs]
-
-
-

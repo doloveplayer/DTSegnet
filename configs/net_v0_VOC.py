@@ -26,8 +26,8 @@ config = {
     'save_interval': 5,
     'patience': 100,
     'dataset_path': r'D:\deeplearning\segformer\VOCdevkit',  # 数据集路径
-    'loss_function': 'CELoss',  # 损失函数
-    'optimizer': 'SGD',  # 优化器
+    'loss_function': 'FocalLoss',  # 损失函数
+    'optimizer': 'AdamW',  # 优化器
     'fp16': False,  # 混合精度
     'device': torch.device("cuda" if torch.cuda.is_available() else "cpu"),
 }
