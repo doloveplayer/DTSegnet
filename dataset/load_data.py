@@ -4,7 +4,40 @@ from torch.utils.data import Dataset
 from torchvision import transforms
 from PIL import Image
 import numpy as np
+import matplotlib.pyplot as plt
 from torchvision.transforms.functional import resized_crop
+
+# Function to map label indices to colors based on the PALETTE
+def label_to_color_image(label):
+    label = label.numpy()  # Convert to numpy for easier indexing
+    color_image = np.zeros((label.shape[0], label.shape[1], 3), dtype=np.uint8)
+    for i in range(len(PALETTE_pots)):
+        color_image[label == i] = PALETTE_pots[i]
+    return color_image
+
+# Function to visualize a batch of images and labels
+def visualize_batch(batch):
+    features, labels = batch
+
+    feature = features[0]  # (C, H, W) tensor
+    label = labels[0]  # (H, W) tensor
+
+    feature = feature.permute(1, 2, 0).numpy()  # Convert to (H, W, C) format
+    feature = np.clip(feature, 0, 1)  # Ensure the image is in range [0, 1]
+
+    label_color = label_to_color_image(label)
+
+    fig, ax = plt.subplots(1, 2, figsize=(12, 6))
+
+    ax[0].imshow(feature)
+    ax[0].set_title("Feature Image")
+    ax[0].axis('off')
+
+    ax[1].imshow(label_color)
+    ax[1].set_title("Label Image")
+    ax[1].axis('off')
+
+    plt.show()
 
 # 定义类
 CLASSES = (
@@ -64,6 +97,10 @@ PALETTE = [
     [0, 0, 0]  # unlabeled
 ]
 
+CLASSES_pots = ('ImSurf', 'Building', 'LowVeg', 'Tree', 'Car', 'Clutter')
+PALETTE_pots = [[255, 255, 255], [0, 0, 255], [0, 255, 255], [0, 255, 0], [255, 204, 0], [255, 0, 0]]
+
+
 class SynchronizedRandomCrop:
     def __init__(self, size):
         self.size = size
@@ -76,8 +113,9 @@ class SynchronizedRandomCrop:
         label = resized_crop(label, i, j, h, w, self.size)
         return img, label
 
-class SegmentationDataset(Dataset):
-    def __init__(self, features_dir, labels_dir, transform=None, target_size=(256, 256)):
+
+class PotsdamDataset(Dataset):
+    def __init__(self, features_dir, labels_dir, transform=None, target_transform=None):
         """
         初始化分割数据集
         :param features_dir: 特征图像的目录
@@ -88,14 +126,13 @@ class SegmentationDataset(Dataset):
         self.features_dir = features_dir
         self.labels_dir = labels_dir
         self.transform = transform
-        self.target_size = target_size
+        self.target_transform = target_transform
         self.image_files = [f for f in os.listdir(features_dir) if f.endswith('.tif')]
         self.label_files = [f for f in os.listdir(labels_dir) if f.endswith('.png')]
+        # print(len(self.image_files))
+        # print(len(self.label_files))
         self.image_files.sort()
         self.label_files.sort()
-        self.label_transform = transforms.Compose([
-            transforms.RandomResizedCrop(256),  # 随机裁剪并调整大小到 224x224
-        ])
 
     def __len__(self):
         return len(self.image_files)
@@ -111,12 +148,18 @@ class SegmentationDataset(Dataset):
         feature = Image.open(feature_path).convert("RGB")
         label = Image.open(label_path).convert("L")
 
-        # 对特征图像应用变换
+        # 同步裁剪和调整
         if self.transform:
-            feature = self.transform(feature)
-            label = torch.tensor(np.array(self.label_transform(label)), dtype=torch.long)  # 标签转换为tensor
-        # unique_label = torch.unique(label)
-        # print(f"Unique label in this data: {unique_label.cpu().numpy()}")
+            img, label = self.transform(feature, label)
+
+        # 转换为张量和归一化
+        if self.target_transform:
+            feature = self.target_transform(feature)
+
+        label = torch.tensor(np.array(label), dtype=torch.long)
+        unique_label = torch.unique(label)
+        print(f"Unique label in this data: {unique_label.cpu().numpy()}")
+
         return feature, label
 
 
@@ -156,5 +199,8 @@ class VOC2012SegmentationDataset(Dataset):
 
         label = torch.tensor(np.array(label), dtype=torch.long)
         label[label == 255] = 0  # 忽略255类
+
+        unique_label = torch.unique(label)
+        print(f"Unique label in this data: {unique_label.cpu().numpy()}")
 
         return img, label

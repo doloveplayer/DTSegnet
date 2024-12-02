@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 import math
 from utils import trunc_normal_
+import torch.nn.functional as F
 
 
 # Define Configurations
@@ -65,29 +66,14 @@ class net(nn.Module):
         self.input_pos_embed = nn.Parameter(torch.randn(1, 3, *input_size))
 
         # BiAttention 的位置嵌入，形状 [1, C1, H/4, W/4]
-        self.bi_attention_pos_embed = nn.Parameter(torch.randn(1, 32, input_size[0] // 4, input_size[1] // 4))
+        self.bi_attention_pos_embed = nn.Parameter(
+            torch.randn(1, self.config.embed_dims[0], input_size[0] // 4, input_size[1] // 4))
 
         # 通道对齐模块
         self.attention_to_decoder = nn.Conv2d(self.config.embed_dims[3], self.config.embed_dims[0],
                                               kernel_size=1)  # 将 p1_attention 的 C4 映射到 C1
         self.output_to_classes = nn.Conv2d(self.config.embed_dims[0], num_classes, kernel_size=1)  # 将最终输出映射到类别数
 
-        self.apply(self._init_weights)
-
-    def _init_weights(self, m):
-        if isinstance(m, nn.Linear):
-            trunc_normal_(m.weight, std=.02)
-            if isinstance(m, nn.Linear) and m.bias is not None:
-                nn.init.constant_(m.bias, 0)
-        elif isinstance(m, nn.LayerNorm):
-            nn.init.constant_(m.bias, 0)
-            nn.init.constant_(m.weight, 1.0)
-        elif isinstance(m, nn.Conv2d):
-            fan_out = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
-            fan_out //= m.groups
-            m.weight.data.normal_(0, math.sqrt(2.0 / fan_out))
-            if m.bias is not None:
-                m.bias.data.zero_()
 
     def forward(self, x):
         """
@@ -106,10 +92,7 @@ class net(nn.Module):
         # feature_maps[2]: [b, 64, H/8, W/8]
         # feature_maps[3]: [b, 160, H/16, W/16]
         # feature_maps[4]: [b, 256, H/32, W/32] (低分辨率语义特征)
-        # print("Input shape:", x.shape)
         feature_maps = self.Encoder(x)
-        # for i, feature_map in enumerate(feature_maps):
-        #     print(f"Feature map at stage {i} shape: {feature_map.shape}")
 
         # 双向注意力模块，输入 [b, C1, H/4, W/4] 和 [b, C4, H/32, W/32]
         # 使用 bi_attention_pos_embed 作为位置嵌入
@@ -121,7 +104,7 @@ class net(nn.Module):
 
         # 特征融合模块，将 [b, 64, H/8, W/8] 和 [b, 160, H/16, W/16] 与 P4_feature_map 融合
         # fusion_map: [b, 256, H/32, W/32]
-        fusion_map = self.FusionModule(feature_maps[2], feature_maps[3], feature_maps[4])+P4_feature_map
+        fusion_map = self.FusionModule(feature_maps[2], feature_maps[3], feature_maps[4]) + P4_feature_map
 
         # 解码器逐步上采样并恢复到更高分辨率
         # output: [b, 32, H/4, W/4] (解码后的高分辨率特征图)
@@ -135,8 +118,11 @@ class net(nn.Module):
         # 融合解码器输出和对齐的注意力特征
         c_mask = output + aligned_attention  # [b, 32, H/4, W/4]
 
+        # 恢复到原始分辨率
+        c_mask = nn.functional.interpolate(c_mask, size=(h, w), mode='bilinear', align_corners=False)  # [b, 32, H, W]
         # 将融合结果映射到类别数并恢复到原始分辨率
-        c_mask = self.output_to_classes(c_mask)  # [b, 3, H/4, W/4]
-        c_mask = nn.functional.interpolate(c_mask, size=(h, w), mode='bilinear', align_corners=False)  # [b, 3, H, W]
+        c_mask = self.output_to_classes(c_mask)  # [b, classes, H/4, W/4]
+        # 应用 softmax 激活函数，将 logits 转换为概率分布
+        c_mask = F.softmax(c_mask, dim=1)  # 在类别维度上应用 softmax
 
         return c_mask

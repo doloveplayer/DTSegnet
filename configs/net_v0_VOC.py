@@ -2,7 +2,7 @@ import os
 import torch
 import numpy as np
 from torch.utils.data import DataLoader
-from dataset.load_data import VOC2012SegmentationDataset, SynchronizedRandomCrop
+from dataset.load_data import VOC2012SegmentationDataset, SynchronizedRandomCrop, visualize_batch
 import torchvision.transforms as transforms
 
 # 配置参数
@@ -12,9 +12,9 @@ config = {
     'best_checkpoint': './checkpoints/net_v0_voc2012/net_v0_voc2012_best.pth',
     'out_img_dir': './output/net_v0_voc2012',
     'comment': "net_v0_voc2012",
-    'accumulation_steps': 4,
+    'accumulation_steps': 1,
     'num_classes': 21,
-    'input_shape': (512, 512),
+    'input_shape': (224, 224),
     'cls_weights': np.ones([21], np.float32),
     'train_batch': 1,
     'train_epoch': 1000,
@@ -33,24 +33,15 @@ config = {
 }
 
 # 定义数据增强
-transform_sync = SynchronizedRandomCrop(size=(512, 512))  # 确保这个方法正确同步裁剪图像和标签
+transform_sync = SynchronizedRandomCrop(size=(224, 224))  # 确保这个方法正确同步裁剪图像和标签
 transform_img = transforms.Compose([
     transforms.ToTensor(),  # 将图像转换为Tensor
     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])  # 图像标准化
 ])
 
-# 数据集实例化
-train_dataset = VOC2012SegmentationDataset(
-    root=config['dataset_path'],  # 使用config中的路径
-    image_set='train',
-    transform=transform_sync,  # 使用同步裁剪
-    target_transform=transform_img  # 图像转换
-)
-
 
 # 获取训练数据加载器
 def get_train_dataloader():
-    print("data path : ", config['dataset_path'])
     dataset = VOC2012SegmentationDataset(
         root=config['dataset_path'],
         image_set='train',
@@ -63,7 +54,6 @@ def get_train_dataloader():
 
 # 获取验证数据加载器
 def get_val_dataloader():
-    print("data path : ", config['dataset_path'])
     dataset = VOC2012SegmentationDataset(
         root=config['dataset_path'],
         image_set='val',
@@ -77,3 +67,8 @@ def get_val_dataloader():
 # 创建数据加载器
 train_loader = get_train_dataloader()
 val_loader = get_val_dataloader()
+
+if __name__ == '__main__':
+    for batch in train_loader:
+        visualize_batch(batch)
+        break

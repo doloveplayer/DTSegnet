@@ -4,12 +4,15 @@ import torch.nn as nn
 from utils import trunc_normal_
 
 class UpsampleDecoder(nn.Module):
-    def __init__(self, embed_dims=[32, 64, 160, 256]):
+    def __init__(self, embed_dims=[32, 64, 160, 256], dropout_rate=0.3):
         """
-        上采样解码器模块，不带跳跃连接。
+        上采样解码器模块，支持 dropout 和不带跳跃连接。
         :param embed_dims: 每一层的通道数列表，从 H/4 到 H/32 的通道数顺序 [H/4通道, H/8通道, H/16通道, H/32通道]
+        :param dropout_rate: dropout 比率，默认为 0.3
         """
         super(UpsampleDecoder, self).__init__()
+
+        self.dropout_rate = dropout_rate
 
         # 构建上采样模块
         self.upsample_blocks = nn.ModuleList([
@@ -18,26 +21,11 @@ class UpsampleDecoder(nn.Module):
                 nn.Conv2d(embed_dims[len(embed_dims) - i - 1], embed_dims[len(embed_dims) - i - 2], kernel_size=3,
                           stride=1, padding=1),  # 卷积操作
                 nn.BatchNorm2d(embed_dims[len(embed_dims) - i - 2]),  # 批归一化
-                nn.ReLU() # 激活函数
+                nn.ReLU(),  # 激活函数
+                nn.Dropout2d(self.dropout_rate)  # 加入 Dropout 层
             )
             for i in range(len(embed_dims) - 1)  # 每次两倍上采样直到 H/4
         ])
-        self.apply(self._init_weights)
-
-    def _init_weights(self, m):
-        if isinstance(m, nn.Linear):
-            trunc_normal_(m.weight, std=.02)
-            if m.bias is not None:
-                nn.init.constant_(m.bias, 0)
-        elif isinstance(m, nn.LayerNorm):
-            nn.init.constant_(m.bias, 0)
-            nn.init.constant_(m.weight, 1.0)
-        elif isinstance(m, nn.Conv2d):
-            fan_out = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
-            fan_out //= m.groups
-            m.weight.data.normal_(0, math.sqrt(2.0 / fan_out))
-            if m.bias is not None:
-                m.bias.data.zero_()
 
     def forward(self, x):
         """
@@ -71,22 +59,7 @@ class UpsampleDecoder(nn.Module):
 #             )
 #             for i in range(len(embed_dims) - 1)  # 每次两倍上采样直到 H/4
 #         ])
-#         self.apply(self._init_weights)
 #
-#     def _init_weights(self, m):
-#         if isinstance(m, nn.Linear):
-#             trunc_normal_(m.weight, std=.02)
-#             if m.bias is not None:
-#                 nn.init.constant_(m.bias, 0)
-#         elif isinstance(m, nn.LayerNorm):
-#             nn.init.constant_(m.bias, 0)
-#             nn.init.constant_(m.weight, 1.0)
-#         elif isinstance(m, nn.Conv2d):
-#             fan_out = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
-#             fan_out //= m.groups
-#             m.weight.data.normal_(0, math.sqrt(2.0 / fan_out))
-#             if m.bias is not None:
-#                 m.bias.data.zero_()
 #
 #     def forward(self, x, skip_features):
 #         """

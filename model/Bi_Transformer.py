@@ -17,7 +17,7 @@ class MultiHeadAttention(nn.Module):
 
 
 class BiDirectionalAttentionModule(nn.Module):
-    def __init__(self, c1, c4, num_heads, mlp_dim, depth):
+    def __init__(self, c1, c4, num_heads, mlp_dim, depth, dropout=0.1):
         super(BiDirectionalAttentionModule, self).__init__()
         self.depth = depth
 
@@ -35,32 +35,26 @@ class BiDirectionalAttentionModule(nn.Module):
             nn.Linear(c4, mlp_dim),
             nn.SELU(),
             nn.Linear(mlp_dim, c4),
+            nn.Dropout(dropout)  # Dropout after MLP
         )
         self.mlp_p1 = nn.Sequential(
             nn.Linear(c4, mlp_dim),
             nn.SELU(),
             nn.Linear(mlp_dim, c4),
+            nn.Dropout(dropout)  # Dropout after MLP
         )
         self.mlp_p4 = nn.Sequential(
             nn.Linear(c4, mlp_dim),
             nn.SELU(),
             nn.Linear(mlp_dim, c4),
+            nn.Dropout(dropout)  # Dropout after MLP
         )
 
         # Normalization
         self.norm = SimpleRMSNorm(c4)
 
-        # Initialize weights
-        self.apply(self._init_weights)
-
-    def _init_weights(self, m):
-        if isinstance(m, nn.Linear):
-            trunc_normal_(m.weight, std=.02)
-            if m.bias is not None:
-                nn.init.constant_(m.bias, 0)
-        elif isinstance(m, nn.LayerNorm):
-            nn.init.constant_(m.bias, 0)
-            nn.init.constant_(m.weight, 1.0)
+        # Dropout after Attention output
+        self.attn_dropout = nn.Dropout(dropout)
 
     def forward(self, P1, P4, pos_embed):
         b, c1, h1, w1 = P1.shape
@@ -77,6 +71,7 @@ class BiDirectionalAttentionModule(nn.Module):
         for _ in range(self.depth):
             # Self attention for P4
             P4_self_attn = self.norm(self.self_attention_p4(P4_tokens, P4_tokens, P4_tokens)) + P4_tokens
+            P4_self_attn = self.attn_dropout(P4_self_attn)  # Dropout after attention
 
             # Cross attention: P4 -> P1
             P4_to_P1_attn = self.cross_attention_p4_to_p1(
@@ -89,6 +84,7 @@ class BiDirectionalAttentionModule(nn.Module):
                 P1_embedded + pos_embedded, P4_to_P1_attn, P4_to_P1_attn
             )
             P1_to_P4_attn = self.norm(P1_to_P4_attn) + P1_embedded
+            P1_to_P4_attn = self.attn_dropout(P1_to_P4_attn)  # Dropout after attention
 
             P4_tokens = P4_to_P1_attn
 
@@ -108,7 +104,7 @@ if __name__ == "__main__":
 
     # 初始化模块
     bi_attention = BiDirectionalAttentionModule(
-        c1=64, c4=256, num_heads=4, mlp_dim=512, depth=3
+        c1=64, c4=256, num_heads=4, mlp_dim=512, depth=3, dropout=0.1
     )
 
     # 前向传播

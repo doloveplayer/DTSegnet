@@ -16,7 +16,6 @@ def seed_everything(seed=11):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-
 def save_checkpoint(model, optimizer, epoch, loss, filepath):
     """保存检查点函数"""
     print(f"Saving checkpoint to {filepath}")
@@ -28,10 +27,8 @@ def save_checkpoint(model, optimizer, epoch, loss, filepath):
     }
     torch.save(checkpoint, filepath)
 
-
 import os
 import torch
-
 
 def load_checkpoint(filepath, model, optimizer=None, strict=False):
     """
