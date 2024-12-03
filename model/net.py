@@ -27,13 +27,13 @@ class ModelConfig:
 configs = {
     "v0": ModelConfig(
         in_chans=3,
-        embed_dims=[32, 64, 128, 256],
-        num_heads_dt=[1, 2, 3, 4],
-        depths_dt=[1, 2, 3, 4],
+        embed_dims=[32, 64, 128, 196],
+        num_heads_dt=[2, 3, 3, 2],
+        depths_dt=[2, 3, 3, 2],
         drop_rate=0,
         num_heads_ba=2,
         mlp_dim=512,
-        depth_ba=2,
+        depth_ba=3,
     )
 }
 
@@ -59,7 +59,7 @@ class net(nn.Module):
         self.FusionModule = FeatureFusionModule(in_channels=self.config.embed_dims, drop_rate=self.config.drop_rate)
         self.BiAttention = BiDirectionalAttentionModule(c1=self.config.embed_dims[0], c4=self.config.embed_dims[3],
                                                         num_heads=self.config.num_heads_ba, depth=self.config.depth_ba,
-                                                        mlp_dim=self.config.mlp_dim)
+                                                        embed_dim=self.config.mlp_dim)
 
         # 输入位置嵌入，形状 [1, C1, H, W]
         self.input_pos_embed = nn.Parameter(torch.randn(1, 3, *input_size))
@@ -68,9 +68,6 @@ class net(nn.Module):
         self.bi_attention_pos_embed = nn.Parameter(
             torch.randn(1, self.config.embed_dims[0], input_size[0] // 4, input_size[1] // 4))
 
-        # 通道对齐模块
-        self.attention_to_decoder = nn.Conv2d(self.config.embed_dims[3], self.config.embed_dims[0],
-                                              kernel_size=1)  # 将 p1_attention 的 C4 映射到 C1
         self.output_to_classes = nn.Conv2d(self.config.embed_dims[0], num_classes, kernel_size=1)  # 将最终输出映射到类别数
 
 
@@ -95,9 +92,9 @@ class net(nn.Module):
 
         # 双向注意力模块，输入 [b, C1, H/4, W/4] 和 [b, C4, H/32, W/32]
         # 使用 bi_attention_pos_embed 作为位置嵌入
-        # p1_attention: [b, 256, H/4, W/4] (与 Decoder 输出通道不一致)
+        # p1_feature_map: [b, 256, H/4, W/4] (与 Decoder 输出通道不一致)
         # P4_feature_map: [b, 256, H/32, W/32]
-        p1_attention, P4_feature_map = self.BiAttention(
+        p1_feature_map, P4_feature_map = self.BiAttention(
             feature_maps[1], feature_maps[4], self.bi_attention_pos_embed
         )
 
@@ -111,11 +108,8 @@ class net(nn.Module):
         # outputs = self.Decoder(fusion_map)
         output = outputs[-1]  # 取解码器的最后一个输出
 
-        # 通道对齐：将 p1_attention 映射到 C1 以便与 output 相加
-        aligned_attention = self.attention_to_decoder(p1_attention)  # [b, 32, H/4, W/4]
-
         # 融合解码器输出和对齐的注意力特征
-        c_mask = output + aligned_attention  # [b, 32, H/4, W/4]
+        c_mask = output + p1_feature_map  # [b, 32, H/4, W/4]
 
         # 恢复到原始分辨率
         c_mask = nn.functional.interpolate(c_mask, size=(h, w), mode='bilinear', align_corners=False)  # [b, 32, H, W]

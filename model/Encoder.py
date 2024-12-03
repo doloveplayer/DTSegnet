@@ -75,7 +75,7 @@ class DiffTransformerEncoder(nn.Module):
             [
                 DTBlock(
                     d=embed_dims[i],
-                    dim=256, heads=num_heads[i],
+                    dim=512, heads=num_heads[i],
                     dropout=drop_rate, depth=depths[i]
                 )
                 for i in range(4)

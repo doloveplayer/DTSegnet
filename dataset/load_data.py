@@ -198,9 +198,9 @@ class VOC2012SegmentationDataset(Dataset):
             img = self.target_transform(img)
 
         label = torch.tensor(np.array(label), dtype=torch.long)
-        label[label == 255] = 0  # 忽略255类
+        label[label == 255] = 0  # 忽略255类 白色当作背景
 
-        unique_label = torch.unique(label)
-        print(f"Unique label in this data: {unique_label.cpu().numpy()}")
+        # unique_label = torch.unique(label)
+        # print(f"Unique label in this data: {unique_label.cpu().numpy()}")
 
         return img, label

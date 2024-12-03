@@ -16,7 +16,7 @@ config = {
     'num_classes': 21,
     'input_shape': (224, 224),
     'cls_weights': np.ones([21], np.float32),
-    'train_batch': 1,
+    'train_batch': 4,
     'train_epoch': 1000,
     'num_workers': 1,
     'learning_rate': 1e-4,

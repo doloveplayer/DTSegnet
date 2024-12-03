@@ -216,7 +216,7 @@ class DifferentialTransformerBlock(nn.Module):
         # FFN
         self.ffn = FeedForward(
             d,
-            embedding_dim,
+            d * 4,
             dropout=dropout
         )
 

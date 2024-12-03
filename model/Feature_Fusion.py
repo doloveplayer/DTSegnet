@@ -18,14 +18,14 @@ class FeatureFusionModule(nn.Module):
         self.conv_p2_to_p3 = nn.Sequential(
             nn.Conv2d(in_channels[1], in_channels[2], kernel_size=3, stride=2, padding=1),
             nn.BatchNorm2d(in_channels[2]),
-            nn.ReLU()
+            nn.LeakyReLU(negative_slope=0.01)
         )
 
         # Conv to downsample and align (P2 + P3) to P4's channels
         self.conv_p3_to_p4 = nn.Sequential(
             nn.Conv2d(in_channels[2], in_channels[3], kernel_size=3, stride=2, padding=1),
             nn.BatchNorm2d(in_channels[3]),
-            nn.ReLU()
+            nn.LeakyReLU(negative_slope=0.01)
         )
 
         # Optional dropout for regularization

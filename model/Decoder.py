@@ -55,7 +55,7 @@ class UpsampleDecoder(nn.Module):
                 nn.Conv2d(embed_dims[len(embed_dims) - i - 1] * 2, embed_dims[len(embed_dims) - i - 2], kernel_size=3,
                           stride=1, padding=1),  # 融合跳跃连接
                 nn.BatchNorm2d(embed_dims[len(embed_dims) - i - 2]),  # 批归一化
-                nn.ReLU(),  # 激活函数
+                nn.LeakyReLU(negative_slope=0.01),
                 nn.Dropout2d(self.dropout_rate)  # 加入 Dropout 层
             )
             for i in range(len(embed_dims) - 1)  # 每次两倍上采样直到 H/4
