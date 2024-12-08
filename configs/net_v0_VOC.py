@@ -19,14 +19,14 @@ config = {
     'train_batch': 4,
     'train_epoch': 1000,
     'num_workers': 1,
-    'learning_rate': 1e-4,
+    'learning_rate': 1e-2,
     'warmup_epochs': 10,
     'weight_decay': 1e-5,
     'momentum': 0.9,
     'save_interval': 5,
     'patience': 100,
     'dataset_path': r'D:\deeplearning\segformer\VOCdevkit',  # 数据集路径
-    'loss_function': 'FocalLoss',  # 损失函数
+    'loss_function': 'CELoss',  # 损失函数
     'optimizer': 'AdamW',  # 优化器
     'fp16': False,  # 混合精度
     'device': torch.device("cuda" if torch.cuda.is_available() else "cpu"),

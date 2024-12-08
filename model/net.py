@@ -24,13 +24,14 @@ class ModelConfig:
         self.mlp_dim = mlp_dim
         self.depth_ba = depth_ba
 
+
 configs = {
     "v0": ModelConfig(
         in_chans=3,
         embed_dims=[32, 64, 128, 196],
         num_heads_dt=[2, 3, 3, 2],
         depths_dt=[2, 3, 3, 2],
-        drop_rate=0,
+        drop_rate=0.5,
         num_heads_ba=2,
         mlp_dim=512,
         depth_ba=3,
@@ -41,7 +42,8 @@ configs = {
 class net(nn.Module):
     def __init__(self, config_name: str,
                  num_classes=21,
-                 input_size=(512, 512)):
+                 input_size=(512, 512),
+                 is_pretraining=False):
         """
                 :param Encoder: 编码器
                 :param Decoder: 解码器
@@ -51,25 +53,31 @@ class net(nn.Module):
                 :param input_size: 输入图像的大小 (H, W)，用于初始化位置嵌入
                 """
         super(net, self).__init__()
+        self.is_pretraining = is_pretraining
         self.config = configs[config_name]
         self.Encoder = DiffTransformerEncoder(in_chans=self.config.in_chans, embed_dims=self.config.embed_dims,
                                               num_heads=self.config.num_heads_dt, depths=self.config.depths_dt,
                                               drop_rate=self.config.drop_rate)
-        self.Decoder = UpsampleDecoder(embed_dims=self.config.embed_dims)
+
         self.FusionModule = FeatureFusionModule(in_channels=self.config.embed_dims, drop_rate=self.config.drop_rate)
-        self.BiAttention = BiDirectionalAttentionModule(c1=self.config.embed_dims[0], c4=self.config.embed_dims[3],
-                                                        num_heads=self.config.num_heads_ba, depth=self.config.depth_ba,
-                                                        embed_dim=self.config.mlp_dim)
 
         # 输入位置嵌入，形状 [1, C1, H, W]
         self.input_pos_embed = nn.Parameter(torch.randn(1, 3, *input_size))
 
-        # BiAttention 的位置嵌入，形状 [1, C1, H/4, W/4]
-        self.bi_attention_pos_embed = nn.Parameter(
-            torch.randn(1, self.config.embed_dims[0], input_size[0] // 4, input_size[1] // 4))
-
-        self.output_to_classes = nn.Conv2d(self.config.embed_dims[0], num_classes, kernel_size=1)  # 将最终输出映射到类别数
-
+        # 修改输出层：如果是分类任务，则替换为一个线性分类头
+        if is_pretraining:
+            self.output_to_classes = nn.Linear(
+                self.config.embed_dims[3] * (input_size[0] // 32) * (input_size[0] // 32), num_classes)  # 分类头
+        else:
+            # BiAttention 的位置嵌入，形状 [1, C1, H/4, W/4]
+            self.bi_attention_pos_embed = nn.Parameter(
+                torch.randn(1, self.config.embed_dims[0], input_size[0] // 4, input_size[1] // 4))
+            self.Decoder = UpsampleDecoder(embed_dims=self.config.embed_dims)
+            self.BiAttention = BiDirectionalAttentionModule(c1=self.config.embed_dims[0], c4=self.config.embed_dims[3],
+                                                            num_heads=self.config.num_heads_ba,
+                                                            depth=self.config.depth_ba,
+                                                            embed_dim=self.config.mlp_dim)
+            self.output_to_classes = nn.Conv2d(self.config.embed_dims[0], num_classes, kernel_size=1)  # 将最终输出映射到类别数
 
     def forward(self, x):
         """
@@ -90,32 +98,36 @@ class net(nn.Module):
         # feature_maps[4]: [b, 256, H/32, W/32] (低分辨率语义特征)
         feature_maps = self.Encoder(x)
 
-        # 双向注意力模块，输入 [b, C1, H/4, W/4] 和 [b, C4, H/32, W/32]
-        # 使用 bi_attention_pos_embed 作为位置嵌入
-        # p1_feature_map: [b, 256, H/4, W/4] (与 Decoder 输出通道不一致)
-        # P4_feature_map: [b, 256, H/32, W/32]
-        p1_feature_map, P4_feature_map = self.BiAttention(
-            feature_maps[1], feature_maps[4], self.bi_attention_pos_embed
-        )
+        if self.is_pretraining:
+            fusion_map = self.FusionModule(feature_maps[2], feature_maps[3], feature_maps[4])
+            out = fusion_map.view(b, -1)
+            c_mask = self.output_to_classes(out)
+        else:
+            # 双向注意力模块，输入 [b, C1, H/4, W/4] 和 [b, C4, H/32, W/32]
+            # 使用 bi_attention_pos_embed 作为位置嵌入
+            # p1_feature_map: [b, C1, H/4, W/4] (与 Decoder 输出通道不一致)
+            # P4_feature_map: [b, C4, H/32, W/32]
+            p1_feature_map, P4_feature_map = self.BiAttention(
+                feature_maps[1], feature_maps[4], self.bi_attention_pos_embed
+            )
+            # 特征融合模块，将 [b, C2, H/8, W/8] 和 [b, C3, H/16, W/16] 与 P4_feature_map 融合
+            # fusion_map: [b, C4, H/32, W/32]
+            fusion_map = self.FusionModule(feature_maps[2], feature_maps[3], feature_maps[4]) + P4_feature_map
+            # 解码器逐步上采样并恢复到更高分辨率
+            # output: [b, 32, H/4, W/4] (解码后的高分辨率特征图)
+            outputs = self.Decoder(fusion_map, [feature_maps[1], feature_maps[2], feature_maps[3], feature_maps[4]])
+            # outputs = self.Decoder(fusion_map)
+            output = outputs[-1]  # 取解码器的最后一个输出
 
-        # 特征融合模块，将 [b, 64, H/8, W/8] 和 [b, 160, H/16, W/16] 与 P4_feature_map 融合
-        # fusion_map: [b, 256, H/32, W/32]
-        fusion_map = self.FusionModule(feature_maps[2], feature_maps[3], feature_maps[4]) + P4_feature_map
+            # 融合解码器输出和对齐的注意力特征
+            c_mask = output + p1_feature_map  # [b, 32, H/4, W/4]
 
-        # 解码器逐步上采样并恢复到更高分辨率
-        # output: [b, 32, H/4, W/4] (解码后的高分辨率特征图)
-        outputs = self.Decoder(fusion_map, [feature_maps[1], feature_maps[2], feature_maps[3], feature_maps[4]])
-        # outputs = self.Decoder(fusion_map)
-        output = outputs[-1]  # 取解码器的最后一个输出
-
-        # 融合解码器输出和对齐的注意力特征
-        c_mask = output + p1_feature_map  # [b, 32, H/4, W/4]
-
-        # 恢复到原始分辨率
-        c_mask = nn.functional.interpolate(c_mask, size=(h, w), mode='bilinear', align_corners=False)  # [b, 32, H, W]
-        # 将融合结果映射到类别数并恢复到原始分辨率
-        c_mask = self.output_to_classes(c_mask)  # [b, classes, H/4, W/4]
-        # 应用 softmax 激活函数，将 logits 转换为概率分布
-        c_mask = F.softmax(c_mask, dim=1)  # 在类别维度上应用 softmax
+            # 恢复到原始分辨率
+            c_mask = nn.functional.interpolate(c_mask, size=(h, w), mode='bilinear',
+                                               align_corners=False)  # [b, 32, H, W]
+            # 将融合结果映射到类别数并恢复到原始分辨率
+            c_mask = self.output_to_classes(c_mask)  # [b, classes, H/4, W/4]
+            # 应用 softmax 激活函数，将 logits 转换为概率分布
+            c_mask = F.softmax(c_mask, dim=1)  # 在类别维度上应用 softmax
 
         return c_mask
