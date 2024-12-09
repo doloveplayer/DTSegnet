@@ -19,7 +19,7 @@ config = {
     'cls_weights': np.ones([200], np.float32),
     'train_batch': 128,
     'train_epoch': 1000,
-    'num_workers': 4,
+    'num_workers': 1,
     'learning_rate': 1e-3,
     'warmup_epochs': 10,
     'weight_decay': 0,

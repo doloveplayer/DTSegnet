@@ -17,43 +17,6 @@ from dataset.load_data import visualize_batch
 torch.cuda.empty_cache()
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-# 反归一化处理
-mean = np.array([0.485, 0.456, 0.406])  # 归一化时的均值
-std = np.array([0.229, 0.224, 0.225])  # 归一化时的标准差
-def create_activation_hook(writer, epoch, batch_idx):
-    def activation_hook(module, input, output):
-        # 获取输出张量
-        activation_values = output.detach()
-
-        # 计算激活值的均值、标准差、最大值、最小值
-        mean = activation_values.mean().item()
-        std = activation_values.std().item()
-        max_val = activation_values.max().item()
-        min_val = activation_values.min().item()
-
-        # 计算激活为零的比例
-        neg_activation_rate = (activation_values < 0).sum().item() / activation_values.numel()
-
-        # 计算非零激活的比例
-        pos_activation_rate = (activation_values >= 0).sum().item() / activation_values.numel()
-
-        # 为每一层生成唯一名称，包括父模块的名称和层的名称
-        parent_module_name = module.__module__.split('.')[-1]  # 获取父模块的名称（例如：nn.Module）
-        layer_name = f"{parent_module_name}_{module.__class__.__name__}"
-
-        # 将这些统计信息写入 TensorBoard
-        writer.add_scalar(f"activations/{layer_name}/mean", mean, global_step=epoch * len(writer.log_dir) + batch_idx)
-        writer.add_scalar(f"activations/{layer_name}/std", std, global_step=epoch * len(writer.log_dir) + batch_idx)
-        writer.add_scalar(f"activations/{layer_name}/max", max_val, global_step=epoch * len(writer.log_dir) + batch_idx)
-        writer.add_scalar(f"activations/{layer_name}/min", min_val, global_step=epoch * len(writer.log_dir) + batch_idx)
-        writer.add_scalar(f"activations/{layer_name}/neg_activation_rate", neg_activation_rate, global_step=epoch * len(writer.log_dir) + batch_idx)
-        writer.add_scalar(f"activations/{layer_name}/pos_activation_rate", pos_activation_rate, global_step=epoch * len(writer.log_dir) + batch_idx)
-
-        # 记录激活值的直方图
-        writer.add_histogram(f"activations/{layer_name}/histogram", activation_values, global_step=epoch * len(writer.log_dir) + batch_idx)
-
-    return activation_hook
-
 
 def Segmentation_train(model, train_loader, val_loader, device, config):
     """
@@ -89,7 +52,7 @@ def Segmentation_train(model, train_loader, val_loader, device, config):
     # 加载检查点
     best_iou = 0.0
     # start_epoch, _ = load_checkpoint(config['best_checkpoint'], model, optimizer)
-    start_epoch, _ = load_checkpoint("./checkpoints/net_v0_voc2012/last_epoch_weights.pth", model, optimizer)
+    start_epoch, _ = load_checkpoint("./checkpoints/net_v0_tiny_imgnet/checkpoint_epoch_340.pth", model, optimizer)
     start_epoch = start_epoch if start_epoch is not None else 0
 
     no_improve_epochs = 0
@@ -103,10 +66,6 @@ def Segmentation_train(model, train_loader, val_loader, device, config):
         with tqdm(train_loader, desc=f"Epoch {epoch + 1}/{epochs}", unit="batch") as tepoch:
             for batch_idx, (images, labels) in enumerate(tepoch):
                 images, labels = images.to(device), labels.to(device)
-                # # 注册钩子并传递 epoch 和 batch_idx
-                # for name, layer in model.named_modules():
-                #     if isinstance(layer, nn.LeakyReLU):  # 或者其他激活函数
-                #         handle = layer.register_forward_hook(create_activation_hook(writer, epoch, batch_idx))
 
                 # 正向传播：如果启用混合精度，使用autocast
                 if fp16:
@@ -119,19 +78,20 @@ def Segmentation_train(model, train_loader, val_loader, device, config):
                     labels = labels.squeeze(1)  # 移除标签的单通道维度
                     loss = loss_fn(outputs, labels.long(), cls_weights=config['cls_weights'])
 
+                # 反向传播
                 if fp16:
-                    # 使用混合精度时，反向传播需要梯度缩放
                     scaler.scale(loss).backward()
-                    if (batch_idx + 1) % accumulation_steps == 0:
+                else:
+                    loss.backward()
+
+                # 梯度累积
+                if (batch_idx + 1) % accumulation_steps == 0 or (batch_idx + 1 == len(tepoch)):
+                    if fp16:
                         scaler.step(optimizer)
                         scaler.update()
-                        optimizer.zero_grad()  # 在每个batch开始前清空梯度
-                else:
-                    # 不使用混合精度时，正常反向传播
-                    loss.backward()
-                    if (batch_idx + 1) % accumulation_steps == 0:
+                    else:
                         optimizer.step()
-                        optimizer.zero_grad()  # 在每个batch开始前清空梯度
+                    optimizer.zero_grad()  # 在累积后的最后一个 batch 或 epoch 结束时清零梯度
 
                 epoch_loss += loss.item()
 
@@ -270,16 +230,16 @@ if __name__ == '__main__':
     # # 初始化权重
     # weights_init(model_, init_type='kaiming', init_gain=0.1, bias_init='normal')
     # model_ = SegFormer(phi="b0").to(device)
-    model.eval()
-    print("Model Summary:")
-    summary(
-        model,
-        input_size=(1, 3, 224, 224),
-        col_names=["input_size",
-                   "output_size",
-                   "num_params",
-                   "params_percent",
-                   "trainable"],
-        depth=10 # Control the depth of details in the output
-    )
+    # model.eval()
+    # print("Model Summary:")
+    # summary(
+    #     model,
+    #     input_size=(1, 3, 224, 224),
+    #     col_names=["input_size",
+    #                "output_size",
+    #                "num_params",
+    #                "params_percent",
+    #                "trainable"],
+    #     depth=10 # Control the depth of details in the output
+    # )
     Segmentation_train(model=model, train_loader=train_loader, val_loader=val_loader, config=config, device=device)

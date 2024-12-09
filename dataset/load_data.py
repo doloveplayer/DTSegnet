@@ -8,6 +8,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from torchvision.transforms.functional import resized_crop
 
+
 # Function to map label indices to colors based on the PALETTE
 def label_to_color_image(label):
     label = label.numpy()  # Convert to numpy for easier indexing
@@ -15,6 +16,7 @@ def label_to_color_image(label):
     for i in range(len(PALETTE_pots)):
         color_image[label == i] = PALETTE_pots[i]
     return color_image
+
 
 # Function to visualize a batch of images and labels
 def visualize_batch(batch):
@@ -39,6 +41,31 @@ def visualize_batch(batch):
     ax[1].axis('off')
 
     plt.show()
+
+
+vod_dict = {
+    "background": 0,
+    "aeroplane": 1,
+    "bicycle": 2,
+    "bird": 3,
+    "boat": 4,
+    "bottle": 5,
+    "bus": 6,
+    "car": 7,
+    "cat": 8,
+    "chair": 9,
+    "cow": 10,
+    "diningtable": 11,
+    "dog": 12,
+    "horse": 13,
+    "motorbike": 14,
+    "person": 15,
+    "pottedplant": 16,
+    "sheep": 17,
+    "sofa": 18,
+    "train": 19,
+    "tvmonitor": 20
+}
 
 # 定义类
 CLASSES = (
@@ -179,6 +206,9 @@ class VOC2012SegmentationDataset(Dataset):
         with open(self.image_set_file, 'r') as f:
             self.img_ids = [line.strip() for line in f.readlines()]
 
+        # 初始化类别统计字典
+        self.class_counts = {class_name: 0 for class_name in vod_dict.keys()}
+
     def __len__(self):
         return len(self.img_ids)
 
@@ -199,12 +229,19 @@ class VOC2012SegmentationDataset(Dataset):
             img = self.target_transform(img)
 
         label = torch.tensor(np.array(label), dtype=torch.long)
-        label[label == 255] = 0  # 忽略255类 白色当作背景
+        label[label == 255] = 0  # 忽略255类，白色当作背景
 
-        # unique_label = torch.unique(label)
-        # print(f"Unique label in this data: {unique_label.cpu().numpy()}")
+        # 更新类别统计
+        unique, counts = torch.unique(label, return_counts=True)
+        for class_idx, count in zip(unique, counts):
+            class_name = [key for key, value in vod_dict.items() if value == class_idx.item()]
+            if class_name:
+                self.class_counts[class_name[0]] += count.item()
 
         return img, label
+
+    def get_class_counts(self):
+        return self.class_counts
 
 
 class TinyImageNet(Dataset):

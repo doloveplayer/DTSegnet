@@ -79,6 +79,29 @@ class net(nn.Module):
                                                             embed_dim=self.config.mlp_dim)
             self.output_to_classes = nn.Conv2d(self.config.embed_dims[0], num_classes, kernel_size=1)  # 将最终输出映射到类别数
 
+    def freeze_layers(self, freeze_encoder=False, freeze_decoder=False, freeze_fusion=False, freeze_biattention=False):
+        """
+        冻结指定的层
+        :param freeze_encoder: 是否冻结编码器层
+        :param freeze_decoder: 是否冻结解码器层
+        :param freeze_fusion: 是否冻结特征融合模块层
+        """
+        if freeze_encoder:
+            for param in self.Encoder.parameters():
+                param.requires_grad = False
+
+        if freeze_decoder:
+            for param in self.Decoder.parameters():
+                param.requires_grad = False
+
+        if freeze_fusion:
+            for param in self.FusionModule.parameters():
+                param.requires_grad = False
+
+        if freeze_biattention:
+            for param in self.BiAttention.parameters():
+                param.requires_grad = False
+
     def forward(self, x):
         """
         :param x: 输入图像 [b, 3, H, W]

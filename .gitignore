@@ -3,3 +3,4 @@ checkpoints/
 output/
 .idea/
 dataset/OxfordIIITPet/
+./resnet.py

@@ -69,6 +69,19 @@ train_loader = get_train_dataloader()
 val_loader = get_val_dataloader()
 
 if __name__ == '__main__':
-    for batch in train_loader:
-        visualize_batch(batch)
-        break
+    dataset = VOC2012SegmentationDataset(
+        root=config['dataset_path'],
+        image_set='train',
+        transform=transform_sync,
+        target_transform=transform_img
+    )
+    # 遍历整个数据集以收集类别统计
+    for _ in dataset:
+        pass
+
+    # 打印类别统计
+    class_counts = dataset.get_class_counts()
+    print("Class counts:", class_counts)
+    # for batch in train_loader:
+    #     visualize_batch(batch)
+    #     break

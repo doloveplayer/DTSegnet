@@ -27,9 +27,6 @@ def save_checkpoint(model, optimizer, epoch, loss, filepath):
     }
     torch.save(checkpoint, filepath)
 
-import os
-import torch
-
 def load_checkpoint(filepath, model, optimizer=None, strict=False):
     """
     加载检查点函数。
@@ -59,14 +56,18 @@ def load_checkpoint(filepath, model, optimizer=None, strict=False):
 
         # 过滤不匹配的权重
         filtered_state_dict = {}
+        successfully_loaded_layers = []  # 用于保存成功加载的层名
         for k, v in model_state_dict.items():
             if k in current_model_state_dict and v.size() == current_model_state_dict[k].size():
                 filtered_state_dict[k] = v
+                successfully_loaded_layers.append(k)  # 记录加载成功的层名
             else:
                 mismatched_keys.append(k)
 
+        # 加载权重
         model.load_state_dict(filtered_state_dict, strict=False)
         print(f"Model loaded with {len(filtered_state_dict)} matching keys.")
+        print(f"Successfully loaded layers: {', '.join(successfully_loaded_layers)}")
         if mismatched_keys:
             print(f"[Warning] {len(mismatched_keys)} keys skipped due to size mismatch: {mismatched_keys}")
     else:
@@ -93,7 +94,6 @@ def load_checkpoint(filepath, model, optimizer=None, strict=False):
         print(f"Checkpoint loaded. Epoch: {epoch}, Loss not found in checkpoint.")
 
     return epoch, loss
-
 
 def save_epoch_predictions(images, labels, preds, out_dir, epoch_idx, mean, std, num_classes):
     """
