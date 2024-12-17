@@ -5,8 +5,6 @@ from .Bi_Transformer import BiDirectionalAttentionModule
 
 import torch
 import torch.nn as nn
-import math
-from utils import trunc_normal_
 import torch.nn.functional as F
 
 
@@ -28,9 +26,9 @@ class ModelConfig:
 configs = {
     "v0": ModelConfig(
         in_chans=3,
-        embed_dims=[32, 64, 128, 196],
-        num_heads_dt=[2, 2, 2, 2],
-        depths_dt=[2, 3, 3, 2],
+        embed_dims=[32, 64, 160, 256],
+        num_heads_dt=[1, 2, 5, 8],
+        depths_dt=[2, 2, 2, 2],
         drop_rate=0.5,
         num_heads_ba=2,
         mlp_dim=512,

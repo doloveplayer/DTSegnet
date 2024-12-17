@@ -29,7 +29,6 @@ class DTBlock(nn.Module):
 
     def __init__(
             self,
-            d: int,
             dim: int,
             heads: int,
             dropout: float,
@@ -39,7 +38,6 @@ class DTBlock(nn.Module):
         Initializes the Differential Transformer Block.
         """
         super(DTBlock, self).__init__()
-        self.d = d
         self.dim = dim
         self.heads = heads
         self.dropout = dropout
@@ -49,7 +47,6 @@ class DTBlock(nn.Module):
         self.layers = nn.ModuleList(
             [
                 DifferentialTransformerBlock(
-                    d=d,
                     embedding_dim=self.dim,
                     heads=self.heads,
                     dropout=self.dropout,
@@ -73,8 +70,7 @@ class DiffTransformerEncoder(nn.Module):
         self.blocks = nn.ModuleList(
             [
                 DTBlock(
-                    d=embed_dims[i],
-                    dim=512, heads=num_heads[i],
+                    dim=embed_dims[i], heads=num_heads[i],
                     dropout=drop_rate, depth=depths[i]
                 )
                 for i in range(4)

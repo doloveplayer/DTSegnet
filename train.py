@@ -43,7 +43,7 @@ def Segmentation_train(model, train_loader, val_loader, device, config):
     scaler = GradScaler() if fp16 else None
 
     model.to(device)
-    # model.freeze_layers(freeze_encoder=True, freeze_decoder=False, freeze_fusion=False, freeze_biattention=True)
+
 
     # 初始化TensorBoard日志
     writer = SummaryWriter(log_dir=config['logs_dir'], comment=config['comment'])
@@ -217,6 +217,7 @@ if __name__ == '__main__':
     model = net("v0", num_classes=config['num_classes'], input_size=config['input_shape']).to(device)
     # 初始化权重
     weights_init(model, init_type='kaiming', init_gain=0.1, bias_init='normal')
+    model.freeze_layers(freeze_encoder=False, freeze_decoder=False, freeze_fusion=False, freeze_biattention=False)
 
     # for batch in train_loader:
     #     visualize_batch(batch, save_dir="./", filename="batch_image.png")
@@ -229,16 +230,16 @@ if __name__ == '__main__':
     # # 初始化权重
     # weights_init(model_, init_type='kaiming', init_gain=0.1, bias_init='normal')
     # model_ = SegFormer(phi="b0").to(device)
-    # model.eval()
-    # print("Model Summary:")
-    # summary(
-    #     model,
-    #     input_size=(1, 3, 224, 224),
-    #     col_names=["input_size",
-    #                "output_size",
-    #                "num_params",
-    #                "params_percent",
-    #                "trainable"],
-    #     depth=10 # Control the depth of details in the output
-    # )
-    Segmentation_train(model=model, train_loader=train_loader, val_loader=val_loader, config=config, device=device)
+    model.eval()
+    print("Model Summary:")
+    summary(
+        model,
+        input_size=(1, 3, 512, 512),
+        col_names=["input_size",
+                   "output_size",
+                   "num_params",
+                   "params_percent",
+                   "trainable"],
+        depth=10 # Control the depth of details in the output
+    )
+    # Segmentation_train(model=model, train_loader=train_loader, val_loader=val_loader, config=config, device=device)
