@@ -12,8 +12,9 @@ config = {
     'logs_dir': './logs/net_v0_tiny_imgnet',
     'best_checkpoint': './checkpoints/net_v0_tiny_imgnet/net_v0_tiny_imgnet_best.pth',
     'out_img_dir': './output/net_v0_tiny_imgnet',
+    'pre_train': 'checkpoints/net_v0_tiny_imgnet/checkpoint_epoch_340.pth',
     'comment': "net_v0_tiny_imgnet",
-    'accumulation_steps': 1,
+    'accumulation_steps': 4,
     'num_classes': 200,
     'input_shape': (64, 64),
     'cls_weights': np.ones([200], np.float32),
@@ -36,7 +37,7 @@ config = {
 # 定义数据增强
 transform_img = transforms.Compose([
     transforms.RandomCrop((64, 64)),  # 确保这个方法正确同步裁剪图像和标签
-    transforms.RandAugment(num_ops=5,
+    transforms.RandAugment(num_ops=9,
                            magnitude=9),
     transforms.ToTensor(),  # 将图像转换为Tensor
     # transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])  # 图像标准化

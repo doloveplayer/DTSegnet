@@ -32,34 +32,6 @@ class FeedForward(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.dropout(self.w2(F.silu(self.w1(x)) * self.w3(x)))
 
-
-class OutputHead(nn.Module):
-    def __init__(self, input_dim, output_dim, activation=None):
-        """
-        Output head implementation.
-        Args:
-            input_dim (int): Dimension of the input features.
-            output_dim (int): Dimension of the output features (e.g., number of classes).
-            activation (callable or None): Optional activation function (e.g., softmax).
-        """
-        super(OutputHead, self).__init__()
-        self.linear = nn.Linear(input_dim, output_dim)
-        self.activation = activation
-
-    def forward(self, x):
-        """
-        Forward pass for OutputHead.
-        Args:
-            x (Tensor): Input tensor of shape (batch_size, input_dim).
-        Returns:
-            Tensor: Output tensor of shape (batch_size, output_dim).
-        """
-        x = self.linear(x)
-        if self.activation:
-            x = self.activation(x)
-        return x
-
-
 class DiffAttn(nn.Module):
     """
     Differential Attention module.
@@ -236,56 +208,3 @@ class DifferentialTransformerBlock(nn.Module):
         attended = self.ffn(self.norm(attended)) + residual2
 
         return attended
-
-
-class DifferentialTransformer(nn.Module):
-    """
-    This class implements a Differential Transformer Block.
-    """
-
-    def __init__(
-            self,
-            dim: int = 512,
-            heads: int = 12,
-            dropout: float = 0.1,
-            λinit: float = None,
-            depth: int = 24,
-            output_dim: int = 512,
-    ):
-        """
-        Initializes the Differential Transformer Block.
-        """
-        super(DifferentialTransformer, self).__init__()
-        self.dim = dim
-        self.heads = heads
-        self.dropout = dropout
-        self.depth = depth
-        self.λinit = λinit if λinit is not None else (0.8 - 0.6 * exp(-0.3 * (depth - 1)))
-        self.output_dim = output_dim
-
-        self.layers = nn.ModuleList(
-            [
-                DifferentialTransformerBlock(
-                    dim=dim,
-                    heads=heads,
-                    dropout=dropout,
-                    λinit=λinit,
-                ) for _ in range(depth)
-            ]
-        )
-
-        # Embedding
-        self.embed = nn.Embedding(num_embeddings=output_dim, embedding_dim=dim)
-
-        # Norm
-        self.norm = SimpleRMSNorm(dim)
-
-    def forward(self, x):
-        # Embed
-        x = self.norm(self.embed(x))
-
-        # Post embed norm
-        for layer in self.layers:
-            x = layer(x)
-
-        return OutputHead(self.dim, output_dim=self.output_dim)(x)

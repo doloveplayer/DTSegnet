@@ -8,41 +8,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 from torchvision.transforms.functional import resized_crop
 
-
-# Function to map label indices to colors based on the PALETTE
-def label_to_color_image(label):
-    label = label.numpy()  # Convert to numpy for easier indexing
-    color_image = np.zeros((label.shape[0], label.shape[1], 3), dtype=np.uint8)
-    for i in range(len(PALETTE_pots)):
-        color_image[label == i] = PALETTE_pots[i]
-    return color_image
-
-
-# Function to visualize a batch of images and labels
-def visualize_batch(batch):
-    features, labels = batch
-
-    feature = features[0]  # (C, H, W) tensor
-    label = labels[0]  # (H, W) tensor
-
-    feature = feature.permute(1, 2, 0).numpy()  # Convert to (H, W, C) format
-    feature = np.clip(feature, 0, 1)  # Ensure the image is in range [0, 1]
-
-    label_color = label_to_color_image(label)
-
-    fig, ax = plt.subplots(1, 2, figsize=(12, 6))
-
-    ax[0].imshow(feature)
-    ax[0].set_title("Feature Image")
-    ax[0].axis('off')
-
-    ax[1].imshow(label_color)
-    ax[1].set_title("Label Image")
-    ax[1].axis('off')
-
-    plt.show()
-
-
 vod_dict = {
     "background": 0,
     "aeroplane": 1,
@@ -66,104 +31,89 @@ vod_dict = {
     "train": 19,
     "tvmonitor": 20
 }
+fbp_dict = {0: 'industrial area', 1: 'paddy field', 2: 'irrigated field', 3: 'dry cropland', 4: 'garden land',
+            5: 'arbor forest',
+            6: 'shrub forest', 7: 'park', 8: 'natural meadow', 9: 'artificial meadow', 10: 'river',
+            11: 'urban residential',
+            12: 'lake', 13: 'pond', 14: 'fish pond', 15: 'snow', 16: 'bareland', 17: 'rural residential', 18: 'stadium',
+            19: 'square', 20: 'road', 21: 'overpass', 22: 'railway station', 23: 'airport', 24: 'unlabeled'}
 
-# 定义类
-CLASSES = (
-    'industrial area',
-    'paddy field',
-    'irrigated field',
-    'dry cropland',
-    'garden land',
-    'arbor forest',
-    'shrub forest',
-    'park',
-    'natural meadow',
-    'artificial meadow',
-    'river',
-    'urban residential',
-    'lake',
-    'pond',
-    'fish pond',
-    'snow',
-    'bareland',
-    'rural residential',
-    'stadium',
-    'square',
-    'road',
-    'overpass',
-    'railway station',
-    'airport',
-    'unlabeled'
-)
+fbp_Palette_Dict = {0: [200, 0, 0], 1: [0, 200, 0], 2: [150, 250, 0], 3: [150, 200, 150], 4: [200, 0, 200],
+                    5: [150, 0, 250],
+                    6: [150, 150, 250], 7: [200, 150, 200], 8: [250, 200, 0], 9: [200, 200, 0], 10: [0, 0, 200],
+                    11: [250, 0, 150],
+                    12: [0, 150, 200], 13: [0, 200, 250], 14: [150, 200, 250], 15: [250, 250, 250], 16: [200, 200, 200],
+                    17: [200, 150, 150], 18: [250, 200, 150], 19: [150, 150, 0], 20: [250, 150, 150], 21: [250, 150, 0],
+                    22: [250, 200, 250], 23: [200, 150, 0], 24: [0, 0, 0]}
 
-# 定义调色板
-PALETTE = [
-    [200, 0, 0],  # industrial area
-    [0, 200, 0],  # paddy field
-    [150, 250, 0],  # irrigated field
-    [150, 200, 150],  # dry cropland
-    [200, 0, 200],  # garden land
-    [150, 0, 250],  # arbor forest
-    [150, 150, 250],  # shrub forest
-    [200, 150, 200],  # park
-    [250, 200, 0],  # natural meadow
-    [200, 200, 0],  # artificial meadow
-    [0, 0, 200],  # river
-    [250, 0, 150],  # urban residential
-    [0, 150, 200],  # lake
-    [0, 200, 250],  # pond
-    [150, 200, 250],  # fish pond
-    [250, 250, 250],  # snow
-    [200, 200, 200],  # bareland
-    [200, 150, 150],  # rural residential
-    [250, 200, 150],  # stadium
-    [150, 150, 0],  # square
-    [250, 150, 150],  # road
-    [250, 150, 0],  # overpass
-    [250, 200, 250],  # railway station
-    [200, 150, 0],  # airport
-    [0, 0, 0]  # unlabeled
-]
+postdam_dict = {0: 'ImSurf', 1: 'Building', 2: 'LowVeg', 3: 'Tree', 4: 'Car', 5: 'Clutter'}
 
-CLASSES_pots = ('ImSurf', 'Building', 'LowVeg', 'Tree', 'Car', 'Clutter')
-PALETTE_pots = [[255, 255, 255], [0, 0, 255], [0, 255, 255], [0, 255, 0], [255, 204, 0], [255, 0, 0]]
+postdam_Palette_Dict = {0: [255, 255, 255], 1: [0, 0, 255], 2: [0, 255, 255], 3: [0, 255, 0], 4: [255, 204, 0],
+                        5: [255, 0, 0]}
 
 
 class SynchronizedRandomCrop:
     def __init__(self, size):
+        """
+        初始化同步裁剪类
+        :param size: 输出裁剪图像和标签的目标尺寸
+        """
         self.size = size
 
     def __call__(self, img, label):
+        """
+        对图像和标签应用同步裁剪
+        :param img: 输入图像
+        :param label: 输入标签
+        :return: 裁剪后的图像和标签
+        """
         # 获取随机裁剪参数
-        i, j, h, w = transforms.RandomResizedCrop.get_params(img, scale=(0.8, 1.0), ratio=(1.0, 1.0))
+        i, j, h, w = transforms.RandomResizedCrop.get_params(
+            img, scale=(0.8, 1.0), ratio=(1.0, 1.0)
+        )
+
         # 同步裁剪图像和标签
         img = resized_crop(img, i, j, h, w, self.size)
         label = resized_crop(label, i, j, h, w, self.size)
-        return img, label
 
+        return img, label
 
 class PotsdamDataset(Dataset):
     def __init__(self, features_dir, labels_dir, transform=None, target_transform=None):
         """
-        初始化分割数据集
-        :param features_dir: 特征图像的目录
-        :param labels_dir: 标签图像的目录
-        :param transform: 图像变换（应用于特征图像）
-        :param target_size: 标签图像裁剪大小
+        Initialize the dataset with feature and label directories.
+        :param features_dir: Directory containing feature images.
+        :param labels_dir: Directory containing label images.
+        :param transform: Transform to apply to feature images.
+        :param target_transform: Transform to apply to label images.
         """
         self.features_dir = features_dir
         self.labels_dir = labels_dir
         self.transform = transform
         self.target_transform = target_transform
         self.image_files = [f for f in os.listdir(features_dir) if f.endswith('.tif')]
-        self.label_files = [f for f in os.listdir(labels_dir) if f.endswith('.png')]
-        # print(len(self.image_files))
-        # print(len(self.label_files))
+        self.label_files = [f for f in os.listdir(labels_dir) if f.endswith('.tif')]
+        print(len(self.image_files), len(self.label_files))
         self.image_files.sort()
         self.label_files.sort()
 
     def __len__(self):
         return len(self.image_files)
+
+    def rgb_to_grayscale(self, rgb_mask):
+        """
+        Convert the RGB mask to a single-channel grayscale mask.
+        :param rgb_mask: The RGB mask image.
+        :return: Grayscale mask (single-channel tensor).
+        """
+        grayscale_mask = np.zeros((rgb_mask.shape[0], rgb_mask.shape[1]), dtype=np.uint8)
+
+        # Map RGB values to label indices using postdam_Palette_Dict
+        for class_idx, color in postdam_Palette_Dict.items():
+            mask = np.all(rgb_mask == color, axis=-1)
+            grayscale_mask[mask] = class_idx
+
+        return grayscale_mask
 
     def __getitem__(self, idx):
         feature_file = self.image_files[idx]
@@ -172,23 +122,24 @@ class PotsdamDataset(Dataset):
         feature_path = os.path.join(self.features_dir, feature_file)
         label_path = os.path.join(self.labels_dir, label_file)
 
-        # 读取特征和标签图像
         feature = Image.open(feature_path).convert("RGB")
-        label = Image.open(label_path).convert("L")
+        label_rgb = Image.open(label_path).convert("RGB")
 
-        # 同步裁剪和调整
         if self.transform:
-            img, label = self.transform(feature, label)
+            feature, label_rgb = self.transform(feature, label_rgb)
 
-        # 转换为张量和归一化
+        label_rgb_np = np.array(label_rgb)
+        label_grayscale = self.rgb_to_grayscale(label_rgb_np)
+
+        label = torch.tensor(label_grayscale, dtype=torch.long)
+
         if self.target_transform:
             feature = self.target_transform(feature)
 
-        label = torch.tensor(np.array(label), dtype=torch.long)
         unique_label = torch.unique(label)
-        print(f"Unique label in this data: {unique_label.cpu().numpy()}")
+        print(f"Unique labels in this batch: {unique_label.cpu().numpy()}")
 
-        return feature, label
+        return feature, label, label_rgb_np
 
 
 class VOC2012SegmentationDataset(Dataset):

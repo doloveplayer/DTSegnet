@@ -1,6 +1,4 @@
 import os
-import torch.nn as nn
-import numpy as np
 from tqdm import tqdm
 from model.net import net
 from utils.metrics import *
@@ -8,11 +6,11 @@ from torchinfo import summary
 from utils.weight_init import weights_init
 from torch.cuda.amp import autocast, GradScaler
 from torch.utils.tensorboard import SummaryWriter
-from configs.net_v0_VOC import config, train_loader, val_loader
+from configs.net_v0 import config, train_loader, val_loader
 from utils.modelsave import save_checkpoint, load_checkpoint, seed_everything, save_epoch_predictions
 from utils.loss_optimizer import get_loss_function, get_optimizer, WarmupCosineScheduler
 
-from dataset.load_data import visualize_batch
+from torch.autograd import profiler
 
 torch.cuda.empty_cache()
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -45,14 +43,15 @@ def Segmentation_train(model, train_loader, val_loader, device, config):
     scaler = GradScaler() if fp16 else None
 
     model.to(device)
+    # model.freeze_layers(freeze_encoder=True, freeze_decoder=False, freeze_fusion=False, freeze_biattention=True)
 
     # 初始化TensorBoard日志
     writer = SummaryWriter(log_dir=config['logs_dir'], comment=config['comment'])
 
     # 加载检查点
     best_iou = 0.0
-    # start_epoch, _ = load_checkpoint(config['best_checkpoint'], model, optimizer)
-    start_epoch, _ = load_checkpoint("./checkpoints/net_v0_tiny_imgnet/checkpoint_epoch_340.pth", model, optimizer)
+    start_epoch, _ = load_checkpoint(config['best_checkpoint'], model, optimizer)
+    # start_epoch, _ = load_checkpoint("./checkpoints/net_v0_tiny_imgnet/checkpoint_epoch_340.pth", model, optimizer)
     start_epoch = start_epoch if start_epoch is not None else 0
 
     no_improve_epochs = 0
@@ -64,7 +63,7 @@ def Segmentation_train(model, train_loader, val_loader, device, config):
         dice_scores = []
 
         with tqdm(train_loader, desc=f"Epoch {epoch + 1}/{epochs}", unit="batch") as tepoch:
-            for batch_idx, (images, labels) in enumerate(tepoch):
+            for batch_idx, (images, labels, _) in enumerate(tepoch):
                 images, labels = images.to(device), labels.to(device)
 
                 # 正向传播：如果启用混合精度，使用autocast
@@ -106,16 +105,16 @@ def Segmentation_train(model, train_loader, val_loader, device, config):
                 tepoch.set_postfix(loss=loss.item(), miou=iou, dice=dice)
 
                 # Example usage
-                save_epoch_predictions(
-                    images=images,
-                    labels=labels,
-                    preds=preds,
-                    out_dir=out_dir,
-                    epoch_idx=epoch,
-                    mean=[0.485, 0.456, 0.406],  # Example mean
-                    std=[0.229, 0.224, 0.225],  # Example std
-                    num_classes=21  # For example, 21 classes in segmentation
-                )
+                # save_epoch_predictions(
+                #     images=images,
+                #     labels=labels,
+                #     preds=preds,
+                #     out_dir=out_dir,
+                #     epoch_idx=epoch,
+                #     mean=[0.485, 0.456, 0.406],  # Example mean
+                #     std=[0.229, 0.224, 0.225],  # Example std
+                #     num_classes=21  # For example, 21 classes in segmentation
+                # )
 
         scheduler.step()
         writer.add_scalar('Learning Rate', scheduler.get_last_lr()[0], epoch)
@@ -180,7 +179,7 @@ def validate_segmentation(model, data_loader, loss_fn, device, epoch, config):
     val_images, val_labels, val_outputs = None, None, None
 
     with torch.no_grad():
-        for images, labels in tqdm(data_loader, desc="Validating", leave=False):
+        for images, labels, _ in tqdm(data_loader, desc="Validating", leave=False):
             images, labels = images.to(device), labels.to(device)
             outputs = model(images)
 

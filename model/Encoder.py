@@ -1,7 +1,7 @@
 import math
 from math import exp
 import torch.nn as nn
-from utils import trunc_normal_
+from .attention import AttentionBlock
 from .Differential_Transformer import DifferentialTransformerBlock, SimpleRMSNorm
 
 
@@ -64,7 +64,6 @@ class DTBlock(nn.Module):
             x = layer(x)
         return x
 
-
 class DiffTransformerEncoder(nn.Module):
     def __init__(self, in_chans, embed_dims, num_heads, depths, drop_rate):
         super().__init__()
@@ -77,6 +76,76 @@ class DiffTransformerEncoder(nn.Module):
                     d=embed_dims[i],
                     dim=512, heads=num_heads[i],
                     dropout=drop_rate, depth=depths[i]
+                )
+                for i in range(4)
+            ]
+        )
+
+        self.patch_embeds = nn.ModuleList([
+            OverlapPatchEmbed(patch_size=7, stride=4, in_chans=in_chans, embed_dim=embed_dims[0]),
+            OverlapPatchEmbed(patch_size=3, stride=2, in_chans=embed_dims[0], embed_dim=embed_dims[1]),
+            OverlapPatchEmbed(patch_size=3, stride=2, in_chans=embed_dims[1], embed_dim=embed_dims[2]),
+            OverlapPatchEmbed(patch_size=3, stride=2, in_chans=embed_dims[2], embed_dim=embed_dims[3]),
+        ])
+
+    def forward(self, x):
+        feature_maps = []
+        B = x.shape[0]
+
+        feature_maps.append(x)
+
+        for i, (block, patch_embed) in enumerate(zip(self.blocks, self.patch_embeds)):
+            x, H, W = patch_embed(x)
+            x = block(x)
+            x = x.reshape(B, H, W, -1).permute(0, 3, 1, 2).contiguous()
+            feature_maps.append(x)
+
+        return feature_maps
+
+
+
+class AttentionBlockLayer(nn.Module):
+    """
+    This class implements a Transformer Block with standard multi-head attention.
+    """
+    def __init__(self, dim, heads, dropout, depth):
+        """
+        Initializes the Attention Block Layer.
+        """
+        super(AttentionBlockLayer, self).__init__()
+        self.depth = depth
+
+        self.layers = nn.ModuleList(
+            [
+                AttentionBlock(
+                    dim=dim,
+                    heads=heads,
+                    dropout=dropout
+                ) for _ in range(depth)
+            ]
+        )
+
+    def forward(self, x):
+        """
+        Forward pass through all attention layers.
+        """
+        for layer in self.layers:
+            x = layer(x)
+        return x
+
+class TransformerEncoder(nn.Module):
+    def __init__(self, in_chans, embed_dims, num_heads, depths, drop_rate):
+        super().__init__()
+        self.depths = depths
+        self.embed_dims = embed_dims
+
+        self.blocks = nn.ModuleList(
+            [
+                AttentionBlockLayer(
+                    dim=embed_dims[i],
+                    heads=num_heads[i],
+                    dropout=drop_rate,
+                    depth=depths[i]
                 )
                 for i in range(4)
             ]

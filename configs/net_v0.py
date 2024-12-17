@@ -3,7 +3,7 @@ import torch
 import numpy as np
 
 from torch.utils.data import DataLoader
-from dataset.load_data import PotsdamDataset, SynchronizedRandomCrop, visualize_batch
+from dataset.load_data import PotsdamDataset, SynchronizedRandomCrop
 import torchvision.transforms as transforms
 
 # 配置参数
@@ -26,10 +26,10 @@ config = {
     'momentum': 0.9,
     'save_interval': 5,
     'patience': 100,
-    'train_img_path': r'D:\deeplearning\GeoSeg-main\data\Potsdam\train\images_1024',  # 数据集路径
-    'train_label_path': r'D:\deeplearning\GeoSeg-main\data\Potsdam\train\masks_1024',
-    'test_img_path': r'D:\deeplearning\GeoSeg-main\data\Potsdam\test\images_1024',  # 数据集路径
-    'test_label_path': r'D:\deeplearning\GeoSeg-main\data\Potsdam\test\masks_1024',
+    'train_img_path': r'D:\deeplearning\GeoSeg-main\data\Potsdam\train\images_512',  # 数据集路径
+    'train_label_path': r'D:\deeplearning\GeoSeg-main\data\Potsdam\train\masks_512',
+    'test_img_path': r'D:\deeplearning\GeoSeg-main\data\Potsdam\test\images_512',  # 数据集路径
+    'test_label_path': r'D:\deeplearning\GeoSeg-main\data\Potsdam\test\masks_512',
     'loss_function': 'CELoss',  # 损失函数
     'optimizer': 'SGD',  # 优化器
     'fp16': False,  # 混合精度
@@ -71,7 +71,3 @@ def get_val_dataloader():
 train_loader = get_train_dataloader()  # 创建 DataLoader 实例
 val_loader = get_val_dataloader()  # 创建 DataLoader 实例
 
-if __name__ == '__main__':
-    for batch in train_loader:
-        visualize_batch(batch)
-        break

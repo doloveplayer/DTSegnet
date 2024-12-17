@@ -2,7 +2,7 @@ import os
 import torch
 import numpy as np
 from torch.utils.data import DataLoader
-from dataset.load_data import VOC2012SegmentationDataset, SynchronizedRandomCrop, visualize_batch
+from dataset.load_data import VOC2012SegmentationDataset, SynchronizedRandomCrop
 import torchvision.transforms as transforms
 
 # 配置参数
@@ -71,9 +71,7 @@ val_loader = get_val_dataloader()
 if __name__ == '__main__':
     dataset = VOC2012SegmentationDataset(
         root=config['dataset_path'],
-        image_set='train',
-        transform=transform_sync,
-        target_transform=transform_img
+        image_set='train'
     )
     # 遍历整个数据集以收集类别统计
     for _ in dataset:

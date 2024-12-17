@@ -92,7 +92,8 @@ def Classification_train(model, train_loader, val_loader, device, config):
 
     # 加载检查点
     best_accuracy = 0.0
-    start_epoch, _ = load_checkpoint(config['best_checkpoint'], model, optimizer)
+    # start_epoch, _ = load_checkpoint(config['best_checkpoint'], model, optimizer)
+    start_epoch, _ = load_checkpoint(config['pre_train'], model, optimizer)
     start_epoch = start_epoch if start_epoch is not None else 0
 
     no_improve_epochs = 0

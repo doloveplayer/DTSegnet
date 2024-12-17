@@ -1,5 +1,5 @@
 from .Decoder import UpsampleDecoder
-from .Encoder import DiffTransformerEncoder
+from .Encoder import DiffTransformerEncoder, TransformerEncoder
 from .Feature_Fusion import FeatureFusionModule
 from .Bi_Transformer import BiDirectionalAttentionModule
 
@@ -29,7 +29,7 @@ configs = {
     "v0": ModelConfig(
         in_chans=3,
         embed_dims=[32, 64, 128, 196],
-        num_heads_dt=[2, 3, 3, 2],
+        num_heads_dt=[2, 2, 2, 2],
         depths_dt=[2, 3, 3, 2],
         drop_rate=0.5,
         num_heads_ba=2,
@@ -55,9 +55,12 @@ class net(nn.Module):
         super(net, self).__init__()
         self.is_pretraining = is_pretraining
         self.config = configs[config_name]
-        self.Encoder = DiffTransformerEncoder(in_chans=self.config.in_chans, embed_dims=self.config.embed_dims,
-                                              num_heads=self.config.num_heads_dt, depths=self.config.depths_dt,
-                                              drop_rate=self.config.drop_rate)
+        self.Encoder = TransformerEncoder(in_chans=self.config.in_chans, embed_dims=self.config.embed_dims,
+                                           num_heads=self.config.num_heads_dt, depths=self.config.depths_dt,
+                                           drop_rate=self.config.drop_rate)
+        # self.Encoder = DiffTransformerEncoder(in_chans=self.config.in_chans, embed_dims=self.config.embed_dims,
+        #                                       num_heads=self.config.num_heads_dt, depths=self.config.depths_dt,
+        #                                       drop_rate=self.config.drop_rate)
 
         self.FusionModule = FeatureFusionModule(in_channels=self.config.embed_dims, drop_rate=self.config.drop_rate)
 
