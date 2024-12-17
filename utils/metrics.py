@@ -1,89 +1,66 @@
+import numpy as np
 import torch
 
-
-import torch
-
-def calculate_iou(preds, labels, num_classes, ignored_classes=None):
+def calculate_confusion_matrix(preds, labels, num_classes, ignored_classes=None):
     """
-    计算分割任务的 IoU，支持忽略某些类别
-    :param preds: 预测的张量，形状为 [batch_size, H, W]
-    :param labels: 真实标签张量，形状为 [batch_size, H, W]
-    :param num_classes: 分类数
-    :param ignored_classes: 需要忽略的类别索引列表 (可选)
-    :return: 每个类别的 IoU 和平均 IoU
+    计算预测与标签的混淆矩阵，用于计算IoU和其他分割指标。
     """
-    # 如果没有指定忽略的类别，默认为空列表
     if ignored_classes is None:
         ignored_classes = []
 
-    # 确保 preds 和 labels 是整数类型
-    preds = preds.to(torch.int64)
-    labels = labels.to(torch.int64)
+    # Flatten预测值和标签
+    preds = preds.view(-1)
+    labels = labels.view(-1)
 
-    # 确保标签值在合法范围内
-    assert preds.min() >= 0 and preds.max() < num_classes, f"Preds values are out of range: {preds.min()} - {preds.max()}"
-    assert labels.min() >= 0 and labels.max() < num_classes, f"Labels values are out of range: {labels.min()} - {labels.max()}"
+    # 去除忽略类
+    if ignored_classes:
+        mask = torch.isin(labels, torch.tensor(ignored_classes).to(labels.device), invert=True)
+        preds = preds[mask]
+        labels = labels[mask]
 
-    iou_per_class = []
-    preds_onehot = torch.nn.functional.one_hot(preds, num_classes=num_classes).permute(0, 3, 1, 2)
-    labels_onehot = torch.nn.functional.one_hot(labels, num_classes=num_classes).permute(0, 3, 1, 2)
+    # 使用Numpy进行高效的混淆矩阵计算
+    preds_np = preds.cpu().numpy()
+    labels_np = labels.cpu().numpy()
+    cm = np.bincount(num_classes * labels_np + preds_np, minlength=num_classes**2).reshape(num_classes, num_classes)
+    cm = torch.tensor(cm, dtype=torch.int64, device=preds.device)
 
-    for class_idx in range(num_classes):
-        # 跳过被忽略的类别
-        if class_idx in ignored_classes:
-            iou_per_class.append(None)
-            continue
-
-        intersection = (preds_onehot[:, class_idx] & labels_onehot[:, class_idx]).sum().item()
-        union = (preds_onehot[:, class_idx] | labels_onehot[:, class_idx]).sum().item()
-        iou = intersection / union if union > 0 else 0
-        iou_per_class.append(iou)
-
-    # 计算忽略类别后的平均 IoU
-    valid_iou = [iou for iou in iou_per_class if iou is not None]
-    mean_iou = sum(valid_iou) / len(valid_iou) if valid_iou else 0
-
-    return iou_per_class, mean_iou
-
-
-def calculate_dice(preds, labels, num_classes, ignored_classes=None):
+    return cm
+def compute_iou(cm):
     """
-    计算分割任务的 Dice 系数，支持忽略某些类别
-    :param preds: 预测的张量，形状为 [batch_size, H, W]
-    :param labels: 真实标签张量，形状为 [batch_size, H, W]
-    :param num_classes: 分类数
-    :param ignored_classes: 需要忽略的类别索引列表 (可选)
-    :return: 每个类别的 Dice 和平均 Dice
+    计算每个类别的IoU
     """
-    # 如果没有指定忽略的类别，默认为空列表
-    if ignored_classes is None:
-        ignored_classes = []
+    intersection = cm.diagonal()
+    union = cm.sum(dim=1) + cm.sum(dim=0) - intersection
+    iou = intersection.float() / union.clamp(min=1)  # 防止除以零
+    return iou
 
-    # 确保 preds 和 labels 是整数类型
-    preds = preds.to(torch.int64)
-    labels = labels.to(torch.int64)
+def compute_dice(cm):
+    """
+    计算每个类别的Dice Coefficient
+    """
+    intersection = cm.diagonal()
+    dice = (2 * intersection.float()) / (cm.sum(dim=1) + cm.sum(dim=0)).clamp(min=1)  # 防止除以零
+    return dice
 
-    # 确保标签值在合法范围内
-    assert preds.min() >= 0 and preds.max() < num_classes, f"Preds values are out of range: {preds.min()} - {preds.max()}"
-    assert labels.min() >= 0 and labels.max() < num_classes, f"Labels values are out of range: {labels.min()} - {labels.max()}"
+def compute_pixel_accuracy(cm):
+    """
+    计算像素级准确度
+    """
+    correct = cm.diagonal().sum()
+    total = cm.sum()
+    return correct.float() / total.clamp(min=1)  # 防止除以零
 
-    dice_per_class = []
-    preds_onehot = torch.nn.functional.one_hot(preds, num_classes=num_classes).permute(0, 3, 1, 2)
-    labels_onehot = torch.nn.functional.one_hot(labels, num_classes=num_classes).permute(0, 3, 1, 2)
+def compute_mean_accuracy(cm):
+    """
+    计算每个类别的准确率的平均值
+    """
+    accuracy = cm.diagonal().float() / cm.sum(dim=1).clamp(min=1)  # 防止除以零
+    return accuracy.mean()
 
-    for class_idx in range(num_classes):
-        # 跳过被忽略的类别
-        if class_idx in ignored_classes:
-            dice_per_class.append(None)
-            continue
-
-        intersection = (preds_onehot[:, class_idx] & labels_onehot[:, class_idx]).sum().item()
-        dice = (2 * intersection) / (preds_onehot[:, class_idx].sum() + labels_onehot[:, class_idx].sum() + 1e-6)
-        dice_per_class.append(dice)
-
-    # 计算忽略类别后的平均 Dice
-    valid_dice = [dice for dice in dice_per_class if dice is not None]
-    mean_dice = sum(valid_dice) / len(valid_dice) if valid_dice else 0
-
-    return dice_per_class, mean_dice
-
+def compute_frequency_weighted_iou(cm):
+    """
+    计算频率加权的IoU
+    """
+    frequency = cm.sum(dim=1).float() / cm.sum().float()
+    iou = compute_iou(cm)
+    return (frequency * iou).sum()

@@ -1,14 +1,14 @@
 import os
 from tqdm import tqdm
 from model.net import net
-from utils.metrics import *
 from torchinfo import summary
-from utils.weight_init import weights_init
 from torch.cuda.amp import autocast, GradScaler
 from torch.utils.tensorboard import SummaryWriter
 from configs.net_v0 import config, train_loader, val_loader
-from utils.modelsave import save_checkpoint, load_checkpoint, seed_everything, save_epoch_predictions
+from utils.modelsave import save_checkpoint, load_checkpoint, seed_everything
 from utils.loss_optimizer import get_loss_function, get_optimizer, WarmupCosineScheduler
+from utils.weight_init import weights_init
+from utils.metrics import *
 
 from torch.autograd import profiler
 
@@ -17,6 +17,8 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 def Segmentation_train(model, train_loader, val_loader, device, config):
+    log_interval = 10
+    cm_update_interval = 20
     """
     训练分割任务的函数，支持早期停止、模型保存和TensorBoard日志。
     """
@@ -44,14 +46,12 @@ def Segmentation_train(model, train_loader, val_loader, device, config):
 
     model.to(device)
 
-
     # 初始化TensorBoard日志
     writer = SummaryWriter(log_dir=config['logs_dir'], comment=config['comment'])
 
     # 加载检查点
     best_iou = 0.0
     start_epoch, _ = load_checkpoint(config['best_checkpoint'], model, optimizer)
-    # start_epoch, _ = load_checkpoint("./checkpoints/net_v0_tiny_imgnet/checkpoint_epoch_340.pth", model, optimizer)
     start_epoch = start_epoch if start_epoch is not None else 0
 
     no_improve_epochs = 0
@@ -59,8 +59,7 @@ def Segmentation_train(model, train_loader, val_loader, device, config):
     for epoch in range(start_epoch, epochs):
         model.train()
         epoch_loss = 0.0
-        iou_scores = []
-        dice_scores = []
+        confusion_matrix = torch.zeros(config['num_classes'], config['num_classes'], dtype=torch.int64)
 
         with tqdm(train_loader, desc=f"Epoch {epoch + 1}/{epochs}", unit="batch") as tepoch:
             for batch_idx, (images, labels, _) in enumerate(tepoch):
@@ -93,55 +92,57 @@ def Segmentation_train(model, train_loader, val_loader, device, config):
                     optimizer.zero_grad()  # 在累积后的最后一个 batch 或 epoch 结束时清零梯度
 
                 epoch_loss += loss.item()
+                # 每隔几个批次更新混淆矩阵
+                if (batch_idx + 1) % cm_update_interval == 0 or (batch_idx + 1 == len(tepoch)):
+                    preds = outputs.argmax(dim=1)
+                    cm = calculate_confusion_matrix(preds, labels, config['num_classes'], config['ignored_classes'],
+                                                    device=device)
+                    confusion_matrix += cm
+                    tmp_iou = compute_iou(confusion_matrix)
 
-                # 计算IoU和Dice
-                preds = outputs.argmax(dim=1)
-                _, iou = calculate_iou(preds, labels, config['num_classes'], ignored_classes=[0])
-                _, dice = calculate_dice(preds, labels, config['num_classes'], ignored_classes=[0])
-
-                iou_scores.append(iou)
-                dice_scores.append(dice)
-
-                tepoch.set_postfix(loss=loss.item(), miou=iou, dice=dice)
-
-                # Example usage
-                # save_epoch_predictions(
-                #     images=images,
-                #     labels=labels,
-                #     preds=preds,
-                #     out_dir=out_dir,
-                #     epoch_idx=epoch,
-                #     mean=[0.485, 0.456, 0.406],  # Example mean
-                #     std=[0.229, 0.224, 0.225],  # Example std
-                #     num_classes=21  # For example, 21 classes in segmentation
-                # )
+                # 每隔几个批次记录日志
+                if (batch_idx + 1) % log_interval == 0:
+                    tepoch.set_postfix(loss=loss.item(), iou=tmp_iou.mean())
 
         scheduler.step()
         writer.add_scalar('Learning Rate', scheduler.get_last_lr()[0], epoch)
 
         avg_epoch_loss = epoch_loss / len(train_loader)
-        avg_iou = sum(iou_scores) / len(iou_scores)
-        avg_dice = sum(dice_scores) / len(dice_scores)
 
-        print(
-            f'Epoch [{epoch + 1}/{epochs}] train --- Loss: {avg_epoch_loss:.4f}, IoU: {avg_iou:.4f}, Dice: {avg_dice:.4f}')
+        # 计算指标
+        iou = compute_iou(confusion_matrix)
+        dice = compute_dice(confusion_matrix)
+        pixel_accuracy = compute_pixel_accuracy(confusion_matrix)
+        mean_accuracy = compute_mean_accuracy(confusion_matrix)
+        freq_weighted_iou = compute_frequency_weighted_iou(confusion_matrix)
+
+        print(f'Epoch [{epoch + 1}/{epochs}] train --- Loss: {avg_epoch_loss:.4f}, '
+              f'IoU: {iou.mean():.4f}, Dice: {dice.mean():.4f}, '
+              f'Pixel Accuracy: {pixel_accuracy:.4f}, Mean Accuracy: {mean_accuracy:.4f}, '
+              f'Freq Weighted IoU: {freq_weighted_iou:.4f}')
+
         writer.add_scalar('Loss/train', avg_epoch_loss, epoch)
-        writer.add_scalar('IoU/train', avg_iou, epoch)
-        writer.add_scalar('Dice/train', avg_dice, epoch)
+        writer.add_scalar('IoU/train', iou.mean(), epoch)
+        writer.add_scalar('Dice/train', dice.mean(), epoch)
+        writer.add_scalar('Pixel Accuracy/train', pixel_accuracy, epoch)
+        writer.add_scalar('Mean Accuracy/train', mean_accuracy, epoch)
+        writer.add_scalar('Freq Weighted IoU/train', freq_weighted_iou, epoch)
 
         # 验证步骤
-        val_loss, val_iou, val_dice, val_images, val_outputs, val_labels = \
-            (validate_segmentation(model, val_loader, loss_fn, device, epoch, config))
+        val_loss, val_iou, val_dice, val_pixel_accuracy, val_mean_accuracy, val_freq_weighted_iou = \
+            validate_segmentation(model, val_loader, loss_fn, device, epoch, config)
 
-        unique_preds = torch.unique(val_outputs)
-        print(f"Unique preds in this batch: {unique_preds.cpu().numpy()}")
-        unique_labels = torch.unique(val_labels)
-        print(f"Unique labels in this batch: {unique_labels.cpu().numpy()}")
+        print(f'Epoch [{epoch + 1}/{epochs}] val --- Loss: {val_loss:.4f}, '
+              f'IoU: {val_iou:.4f}, Dice: {val_dice:.4f}, '
+              f'Pixel Accuracy: {val_pixel_accuracy:.4f}, Mean Accuracy: {val_mean_accuracy:.4f}, '
+              f'Freq Weighted IoU: {val_freq_weighted_iou:.4f}')
 
-        print(f'Epoch [{epoch + 1}/{epochs}] val --- Loss: {val_loss:.4f}, IoU: {val_iou:.4f}, Dice: {val_dice:.4f}')
         writer.add_scalar('Loss/val', val_loss, epoch)
         writer.add_scalar('IoU/val', val_iou, epoch)
         writer.add_scalar('Dice/val', val_dice, epoch)
+        writer.add_scalar('Pixel Accuracy/val', val_pixel_accuracy, epoch)
+        writer.add_scalar('Mean Accuracy/val', val_mean_accuracy, epoch)
+        writer.add_scalar('Freq Weighted IoU/val', val_freq_weighted_iou, epoch)
 
         # 保存检查点
         if (epoch + 1) % save_interval == 0:
@@ -149,61 +150,50 @@ def Segmentation_train(model, train_loader, val_loader, device, config):
             save_checkpoint(model, optimizer, epoch + 1, val_loss, checkpoint_path)
             print(f"Checkpoint saved at '{checkpoint_path}'")
 
-        # 保存最好的模型
+        # 保存最佳模型
         if val_iou > best_iou:
             best_iou = val_iou
-            save_checkpoint(model, optimizer, epoch + 1, val_loss, config['best_checkpoint'])
-            print(f"Best model saved at epoch {epoch + 1} with IoU {best_iou:.4f}")
             no_improve_epochs = 0
+            save_checkpoint(model, optimizer, epoch, save_dir, "best_checkpoint.pth")
         else:
             no_improve_epochs += 1
 
-        # 早期停止：如果验证集IoU在指定次数内没有改善，停止训练
         if no_improve_epochs >= patience:
-            print(f"Stopping training early at epoch {epoch + 1} due to no improvement.")
+            print(f"Early stopping triggered at epoch {epoch + 1}")
             break
 
-    writer.close()
-    print("Training complete.")
 
-
-def validate_segmentation(model, data_loader, loss_fn, device, epoch, config):
+def validate_segmentation(model, val_loader, loss_fn, device, epoch, config):
     """
-    Validation function for segmentation tasks. Computes IoU, Dice, and saves sample predictions.
+    用于验证模型的表现。
     """
     model.eval()
-    running_loss = 0.0
-    iou_scores = []
-    dice_scores = []
-
-    val_images, val_labels, val_outputs = None, None, None
+    val_loss = 0.0
+    confusion_matrix = torch.zeros(config['num_classes'], config['num_classes'], dtype=torch.int64)
 
     with torch.no_grad():
-        for images, labels, _ in tqdm(data_loader, desc="Validating", leave=False):
+        for images, labels, _ in tqdm(val_loader, desc="Validating", unit="batch"):
             images, labels = images.to(device), labels.to(device)
             outputs = model(images)
+            labels = labels.squeeze(1)
 
-            labels = labels.squeeze(1)  # 去掉标签的单通道维度
             loss = loss_fn(outputs, labels.long(), cls_weights=config['cls_weights'])
-            running_loss += loss.item()
+            val_loss += loss.item()
 
-            # 计算IoU和Dice
             preds = outputs.argmax(dim=1)
-            _, iou = calculate_iou(preds, labels, config['num_classes'], ignored_classes=[0])
-            _, dice = calculate_dice(preds, labels, config['num_classes'], ignored_classes=[0])
+            cm = calculate_confusion_matrix(preds, labels, config['num_classes'], ignored_classes=[0])
+            confusion_matrix += cm
 
-            iou_scores.append(iou)  # 保存当前batch的IoU
-            dice_scores.append(dice)  # 保存当前batch的Dice
+    avg_val_loss = val_loss / len(val_loader)
 
-            # 保存最后一批次的数据（可以选择保存任何一批次的数据）
-            val_images, val_labels, val_outputs = images, labels, preds
+    # 计算验证指标
+    iou = compute_iou(confusion_matrix)
+    dice = compute_dice(confusion_matrix)
+    pixel_accuracy = compute_pixel_accuracy(confusion_matrix)
+    mean_accuracy = compute_mean_accuracy(confusion_matrix)
+    freq_weighted_iou = compute_frequency_weighted_iou(confusion_matrix)
 
-    # 计算平均损失、IoU和Dice
-    avg_loss = running_loss / len(data_loader)
-    avg_iou = sum(iou_scores) / len(iou_scores)
-    avg_dice = sum(dice_scores) / len(dice_scores)
-
-    return avg_loss, avg_iou, avg_dice, val_images, val_outputs, val_labels
+    return avg_val_loss, iou.mean(), dice.mean(), pixel_accuracy, mean_accuracy, freq_weighted_iou
 
 
 if __name__ == '__main__':
@@ -229,7 +219,8 @@ if __name__ == '__main__':
     # model_ = net("v0", num_classes=config['num_classes'], input_size=config['input_shape']).to(device)
     # # 初始化权重
     # weights_init(model_, init_type='kaiming', init_gain=0.1, bias_init='normal')
-    # model_ = SegFormer(phi="b0").to(device)
+    # from model.segformer.segformer import SegFormer
+    # model = SegFormer(phi="b0").to(device)
     model.eval()
     print("Model Summary:")
     summary(
@@ -240,6 +231,6 @@ if __name__ == '__main__':
                    "num_params",
                    "params_percent",
                    "trainable"],
-        depth=10 # Control the depth of details in the output
+        depth=10  # Control the depth of details in the output
     )
     # Segmentation_train(model=model, train_loader=train_loader, val_loader=val_loader, config=config, device=device)

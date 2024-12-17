@@ -8,8 +8,12 @@ from torch.optim.lr_scheduler import _LRScheduler
 
 # ===================== 定义损失函数 =====================
 def CE_Loss(inputs, target, cls_weights):
+    # 1. 对类别权重进行归一化
     cls_weights = np.array(cls_weights)
-    weights = torch.from_numpy(cls_weights).to(inputs.device).float()
+    cls_weights_normalized = cls_weights / np.sum(cls_weights)  # 归一化
+
+    # 2. 将归一化后的权重转换为PyTorch张量并移动到输入设备
+    weights = torch.from_numpy(cls_weights_normalized).to(inputs.device).float()
     n, c, h, w = inputs.size()
     nt, ht, wt = target.size()
     if h != ht and w != wt:
@@ -23,8 +27,12 @@ def CE_Loss(inputs, target, cls_weights):
 
 
 def Focal_Loss(inputs, target, cls_weights, alpha=0.5, gamma=2):
+    # 对类别权重进行归一化
     cls_weights = np.array(cls_weights)
-    weights = torch.from_numpy(cls_weights).to(inputs.device).float()
+    cls_weights_normalized = cls_weights / np.sum(cls_weights)  # 归一化
+
+    # 将归一化后的权重转换为PyTorch张量并移动到输入设备
+    weights = torch.from_numpy(cls_weights_normalized).to(inputs.device).float()
     n, c, h, w = inputs.size()
     nt, ht, wt = target.size()
     if h != ht and w != wt:
